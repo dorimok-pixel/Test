@@ -1,4 +1,4 @@
-__version__ = 6, 6, 6
+__version__ = 7, 7, 7
 # name: Boys
 # meta developer: @mofkomodules
 # description: Присылает настоящих мужиков...
@@ -37,7 +37,7 @@ class Boys(loader.Module):
 )
 
     async def rboy(self, message):
-        """Отправить NSFW картинку с Фонда"""
+        """Отправляет рандомного аниме бойчика"""
         send = await utils.answer(message, self.strings("sending"))
     
         try:
