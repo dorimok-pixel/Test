@@ -52,12 +52,5 @@ class Boys(loader.Module):
         reply_to=getattr(message, "reply_to_msg_id", None)
     )
 		
-		await self.client.send_file(
-                message.chat_id,
-                rndm_mes,
-                caption=self.strings["<emoji document_id=5215616660001552867>😍</emoji>Ваш парень"],
-                reply_to=reply_id,
-		)
-		
         time.sleep(0.2)
         await self.client.delete_messages(message.chat_id, send)
