@@ -1,4 +1,4 @@
-__version__ = 1, 0, 0
+__version__ = 6, 6, 6
 # name: Boys
 # meta developer: @mofkomodules
 # description: Присылает настоящих мужиков...
@@ -22,12 +22,12 @@ class Boys(loader.Module):
 
     strings = {
     "name": "Boys",
-    "sending": "<Searching for pic",
+    "sending": "<emoji document_id=5195377464137753198>🤔</emoji>Searching for pic",
     "error": "<emoji document_id=5276240711795107620>⚠️</emoji>An error accured, check logs",
     }
 
     strings_ru = {
-    "sending": "Ищем вам парня.",
+    "sending": "<emoji document_id=5195377464137753198>🤔</emoji>Ищем вам парня.",
     "error": "<emoji document_id=5276240711795107620>⚠️</emoji>Произошла ошибка, чекай логи",
     }
             
@@ -36,14 +36,14 @@ class Boys(loader.Module):
     ru_doc="Отправляет рандомного аниме бойчика",
 )
 
-    async def fond(self, message):
+    async def rboy(self, message):
         """Отправить NSFW картинку с Фонда"""
         send = await utils.answer(message, self.strings("sending"))
     
         try:
-            mes = await self.client.get_messages(entity, limit=1500)
+            mes = await self.client.get_messages(entity, limit=2500)
         except Exception:
-            return await utils.answer(message, self.strings("error")), logger.error("An error! Probably, your request to enter Foundation is pending and wasn't accepted yet, if you didn't sent request, you can do this by link:" f"{link}")
+            return await utils.answer(message, self.strings("error")), logger.error("An error! Probably, link:" f"{link}")
 	        
         rndm_mes = random.choice(mes)
         await message.client.send_message(
