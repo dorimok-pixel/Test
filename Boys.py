@@ -51,6 +51,7 @@ class Boys(loader.Module):
         message=rndm_mes,
         reply_to=getattr(message, "reply_to_msg_id", None)
     )
+		
 		await self.client.send_file(
                 message.chat_id,
                 rndm_mes,
