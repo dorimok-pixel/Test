@@ -1,4 +1,4 @@
-__version__ = (2, 0, 0)
+__version__ = (1, 0, 0)
 
 # meta developer: @your_username
 # description: Автоматически меняет NFT подарок в статусе
@@ -26,7 +26,7 @@ class AutoGifts(loader.Module):
         "no_gifts": "❌ Нет добавленных подарков",
         "loading": "💫 Получаю информацию о NFT...",
         "invalid_link": "❌ Неверная ссылка на NFT\nПример: t.me/nft/SwagBag-22090",
-        "nft_added": "✅ NFT подарок добавлен: {}",
+        "nft_added": "✅ NFT подарок добавлен: {}\nID: {}",
         "nft_not_found": "❌ Не удалось получить информацию о NFT",
     }
     
@@ -39,7 +39,7 @@ class AutoGifts(loader.Module):
         "no_gifts": "❌ Нет добавленных подарков",
         "loading": "💫 Получаю информацию о NFT...",
         "invalid_link": "❌ Неверная ссылка на NFT\nПример: t.me/nft/SwagBag-22090",
-        "nft_added": "✅ NFT подарок добавлен: {}",
+        "nft_added": "✅ NFT подарок добавлен: {}\nID: {}",
         "nft_not_found": "❌ Не удалось получить информацию о NFT",
     }
     
@@ -78,25 +78,51 @@ class AutoGifts(loader.Module):
             match = re.search(pattern, link)
             
             if not match:
+                logger.error(f"Invalid link format: {link}")
                 return None
             
             nft_slug = match.group(1)
+            logger.info(f"Searching for NFT: {nft_slug}")
             
             # Пробуем получить информацию через канал NFT
-            entity = await self._client.get_entity(f"t.me/nft")
+            try:
+                entity = await self._client.get_entity("t.me/nft")
+            except Exception as e:
+                logger.error(f"Can't access @nft channel: {e}")
+                return None
             
             # Ищем сообщения с этим NFT
-            async for message in self._client.iter_messages(entity, limit=100):
-                if message.text and nft_slug in message.text:
+            async for message in self._client.iter_messages(entity, limit=200):
+                if not message.text:
+                    continue
+                    
+                # Ищем упоминание NFT в тексте сообщения
+                if nft_slug in message.text:
+                    logger.info(f"Found message with NFT: {message.id}")
+                    
                     # Пытаемся найти document_id в медиа
                     if message.media:
+                        logger.info(f"Message has media: {type(message.media)}")
+                        
                         if hasattr(message.media, 'document'):
+                            doc_id = message.media.document.id
+                            logger.info(f"Found document ID: {doc_id}")
                             return {
-                                'document_id': message.media.document.id,
+                                'document_id': doc_id,
                                 'title': nft_slug,
                                 'link': link
                             }
+                        elif hasattr(message.media, 'webpage'):
+                            if hasattr(message.media.webpage, 'document'):
+                                doc_id = message.media.webpage.document.id
+                                logger.info(f"Found webpage document ID: {doc_id}")
+                                return {
+                                    'document_id': doc_id,
+                                    'title': nft_slug,
+                                    'link': link
+                                }
             
+            logger.warning(f"NFT not found in @nft channel: {nft_slug}")
             return None
             
         except Exception as e:
@@ -128,6 +154,8 @@ class AutoGifts(loader.Module):
             
             if success:
                 logger.info(f"Подарок изменен: {nft_gift['title']}")
+            else:
+                logger.error(f"Не удалось установить подарок: {nft_gift['title']}")
             
             # Переходим к следующему подарку
             self.current_index = (self.current_index + 1) % len(self.nft_gifts)
@@ -216,7 +244,12 @@ class AutoGifts(loader.Module):
             )
             return
         
-        link = args[0]
+        link = args[0].strip()
+        
+        # Проверяем формат ссылки
+        if not link.startswith(('t.me/nft/', 'https://t.me/nft/')):
+            await utils.answer(message, self.strings("invalid_link"))
+            return
         
         await utils.answer(message, self.strings("loading"))
         
@@ -237,7 +270,7 @@ class AutoGifts(loader.Module):
         self.nft_gifts.append(nft_info)
         self._save_gifts()
         
-        await utils.answer(message, self.strings("nft_added").format(nft_info['title']))
+        await utils.answer(message, self.strings("nft_added").format(nft_info['title'], nft_info['document_id']))
 
     @loader.command(
         en_doc="Remove NFT gift",
@@ -337,6 +370,49 @@ class AutoGifts(loader.Module):
             status_text += f"📊 Текущий: {current_gift['title']} ({self.current_index + 1}/{len(self.nft_gifts)})"
         
         await utils.answer(message, status_text)
+
+    @loader.command(
+        en_doc="Add gift by ID manually",
+        ru_doc="Добавить подарок по ID вручную"
+    )
+    async def addgiftid(self, message):
+        """Добавить подарок по ID вручную"""
+        args = utils.get_args(message)
+        if len(args) < 2:
+            await utils.answer(message, 
+                "❌ Укажите ID и название подарка\n"
+                "📝 Пример:\n"
+                ".addgiftid 123456789 \"Мой NFT\"\n\n"
+                "🔧 Как найти ID:\n"
+                "1. Используйте другие модули для просмотра ID подарков\n"
+                "2. Или найдите ID через отладку"
+            )
+            return
+        
+        try:
+            doc_id = int(args[0])
+            title = args[1]
+            link = f"manual_{doc_id}"
+            
+            # Проверяем нет ли уже такого ID
+            for existing_nft in self.nft_gifts:
+                if existing_nft['document_id'] == doc_id:
+                    await utils.answer(message, f"❌ Подарок с ID {doc_id} уже есть в списке")
+                    return
+            
+            nft_info = {
+                'document_id': doc_id,
+                'title': title,
+                'link': link
+            }
+            
+            self.nft_gifts.append(nft_info)
+            self._save_gifts()
+            
+            await utils.answer(message, f"✅ Подарок добавлен: {title}\nID: {doc_id}")
+            
+        except ValueError:
+            await utils.answer(message, "❌ Укажите числовой ID")
 
     async def on_unload(self):
         """Остановка при выгрузке модуля"""
