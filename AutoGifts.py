@@ -1,19 +1,20 @@
-__version__ = (2, 0, 0)
-# name: AutoGifts
-# meta developer: @mofkomodules
-# description: Автоматически меняет NFT подарок в профиле
+__version__ = (3, 0, 0)
+
+# meta developer: @your_username
+# description: Автоматически меняет NFT подарок в статусе
 
 import asyncio
 import logging
-from telethon.tl.functions.account import UpdateEmojiStatusRequest
-from telethon.tl.types import EmojiStatus
 from .. import loader, utils
+from telethon.tl.functions.account import UpdateEmojiStatusRequest
+from telethon.tl.functions.payments import GetSavedStarGiftsRequest
+from telethon.tl.types import EmojiStatus, SavedStarGift, StarGiftUnique
 
 logger = logging.getLogger(__name__)
 
 @loader.tds
-class AutoGifts(loader.Module):
-    """Автоматически меняет NFT подарок в профиле"""
+class GiftChangerMod(loader.Module):
+    """Автоматически меняет NFT подарок в статусе"""
     
     strings = {
         "name": "GiftChanger",
@@ -22,11 +23,9 @@ class AutoGifts(loader.Module):
         "already_running": "❌ Смена NFT подарков уже запущена",
         "already_stopped": "❌ Смена NFT подарков уже остановлена",
         "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
-        "no_gifts": "❌ В списке нет NFT подарков. Добавьте их командой .addgift",
-        "gift_added": "✅ NFT подарок {} добавлен в список",
-        "gift_removed": "✅ NFT подарок {} удален из списка",
-        "gift_not_found": "❌ NFT подарок {} не найден в списке",
-        "interval_updated": "✅ Интервал смены обновлен: {} секунд",
+        "no_gifts": "❌ У вас нет NFT подарков",
+        "loading": "💫 Получаю список подарков...",
+        "current_gift": "🎁 Текущий подарок: {}",
     }
     
     strings_ru = {
@@ -35,11 +34,9 @@ class AutoGifts(loader.Module):
         "already_running": "❌ Смена NFT подарков уже запущена",
         "already_stopped": "❌ Смена NFT подарков уже остановлена",
         "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
-        "no_gifts": "❌ В списке нет NFT подарков. Добавьте их командой .addgift",
-        "gift_added": "✅ NFT подарок {} добавлен в список",
-        "gift_removed": "✅ NFT подарок {} удален из списка",
-        "gift_not_found": "❌ NFT подарок {} не найден в списке",
-        "interval_updated": "✅ Интервал смены обновлен: {} секунд",
+        "no_gifts": "❌ У вас нет NFT подарков",
+        "loading": "💫 Получаю список подарков...",
+        "current_gift": "🎁 Текущий подарок: {}",
     }
     
     def __init__(self):
@@ -54,46 +51,92 @@ class AutoGifts(loader.Module):
         self.is_running = False
         self.task = None
         self.current_index = 0
-        self.gift_ids = []
+        self.nft_gifts = []
     
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        self.gift_ids = self._db.get(__name__, "gift_ids", [])
         me = await self._client.get_me()
         if not me.premium:
             logger.warning("Telegram Premium required for NFT gifts")
-    
-    def _save_gifts(self):
-        """Сохраняет список подарков в базу данных"""
-        self._db.set(__name__, "gift_ids", self.gift_ids)
-    
-    async def _change_gift(self):
-        """Смена NFT подарка в профиле"""
+
+    async def _fetch_all_saved_gifts(self):
+        """Получает все сохраненные подарки"""
         try:
-            if not self.gift_ids:
-                logger.error("No gifts in list")
-                return
-                
-            me = await self._client.get_me()
-            if not me.premium:
-                logger.error("No Telegram Premium")
-                return
-                
-            gift_id = self.gift_ids[self.current_index]
+            first = await self._client(GetSavedStarGiftsRequest(peer="me", offset="", limit=100))
+            gifts = list(first.gifts) if getattr(first, "gifts", None) else []
+            total = getattr(first, "count", len(gifts))
             
+            if total > len(gifts):
+                pages = (total + 99) // 100
+                for i in range(1, pages):
+                    next_page = await self._client(GetSavedStarGiftsRequest(
+                        peer="me", 
+                        offset=str(100 * i).encode(), 
+                        limit=100
+                    ))
+                    gifts.extend(next_page.gifts)
+            
+            return gifts
+        except Exception as e:
+            logger.error(f"Ошибка при получении подарков: {e}")
+            return []
+
+    async def _get_nft_gifts(self):
+        """Получает только NFT подарки с document_id"""
+        all_gifts = await self._fetch_all_saved_gifts()
+        nft_gifts = []
+        
+        for gift in all_gifts:
+            if not isinstance(gift, SavedStarGift):
+                continue
+            
+            # Фильтруем только NFT подарки (StarGiftUnique)
+            if isinstance(gift.gift, StarGiftUnique):
+                # Получаем document_id из NFT подарка
+                if hasattr(gift.gift, 'document_id'):
+                    nft_gifts.append({
+                        'document_id': gift.gift.document_id,
+                        'title': getattr(gift.gift, 'title', 'Unknown NFT'),
+                        'gift': gift
+                    })
+        
+        return nft_gifts
+
+    async def _set_emoji_status(self, document_id: int):
+        """Устанавливает NFT подарок как emoji статус"""
+        try:
             await self._client(UpdateEmojiStatusRequest(
-                emoji_status=EmojiStatus(document_id=gift_id)
+                emoji_status=EmojiStatus(document_id=document_id)
             ))
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при установке emoji статуса: {e}")
+            return False
+
+    async def _change_gift(self):
+        """Смена текущего NFT подарка в статусе"""
+        try:
+            if not self.nft_gifts:
+                return
+
+            # Выбираем следующий подарок
+            nft_gift = self.nft_gifts[self.current_index]
             
-            self.current_index = (self.current_index + 1) % len(self.gift_ids)
-            logger.info(f"NFT подарок обновлен: {gift_id}")
+            # Устанавливаем как emoji статус
+            success = await self._set_emoji_status(nft_gift['document_id'])
+            
+            if success:
+                logger.info(f"NFT подарок изменен: {nft_gift['title']}")
+            
+            # Переходим к следующему подарку
+            self.current_index = (self.current_index + 1) % len(self.nft_gifts)
             
         except Exception as e:
-            logger.error(f"Ошибка при смене NFT подарка: {e}")
-    
+            logger.error(f"Ошибка при смене подарка: {e}")
+
     async def _gift_loop(self):
-        """Основной цикл смены NFT подарков"""
+        """Основной цикл смены подарков"""
         while self.is_running:
             try:
                 await self._change_gift()
@@ -101,15 +144,15 @@ class AutoGifts(loader.Module):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Ошибка в цикле смены NFT подарков: {e}")
+                logger.error(f"Ошибка в цикле смены подарков: {e}")
                 await asyncio.sleep(60)
-    
+
     @loader.command(
         en_doc="Start automatic NFT gift changing",
-        ru_doc="Запустить автоматическую смену NFT подарков"
+        ru_doc="Запустить автоматическую смену NFT подарков в статусе"
     )
     async def giftstart(self, message):
-        """Запустить автоматическую смену NFT подарков"""
+        """Запустить автоматическую смену NFT подарков в статусе"""
         if self.is_running:
             await utils.answer(message, self.strings("already_running"))
             return
@@ -119,14 +162,23 @@ class AutoGifts(loader.Module):
             await utils.answer(message, self.strings("no_premium"))
             return
         
-        if not self.gift_ids:
+        # Загружаем список NFT подарков
+        await utils.answer(message, self.strings("loading"))
+        self.nft_gifts = await self._get_nft_gifts()
+        
+        if not self.nft_gifts:
             await utils.answer(message, self.strings("no_gifts"))
             return
-            
+        
         self.is_running = True
+        self.current_index = 0
         self.task = asyncio.create_task(self._gift_loop())
+        
+        # Сразу устанавливаем первый подарок
+        await self._change_gift()
+        
         await utils.answer(message, self.strings("started").format(self.config["interval_seconds"]))
-    
+
     @loader.command(
         en_doc="Stop automatic NFT gift changing", 
         ru_doc="Остановить автоматическую смену NFT подарков"
@@ -144,67 +196,32 @@ class AutoGifts(loader.Module):
                 await self.task
             except asyncio.CancelledError:
                 pass
+        
         await utils.answer(message, self.strings("stopped"))
-    
+
     @loader.command(
-        en_doc="Add NFT gift ID",
-        ru_doc="Добавить ID NFT подарка"
+        en_doc="Show current gift status",
+        ru_doc="Показать статус текущего подарка"
     )
-    async def addgift(self, message):
-        """Добавить ID NFT подарка"""
-        args = utils.get_args(message)
-        if not args:
-            await utils.answer(message, "❌ Укажите ID подарка")
-            return
+    async def giftstatus(self, message):
+        """Показать статус текущего подарка"""
+        if not self.nft_gifts:
+            self.nft_gifts = await self._get_nft_gifts()
         
-        try:
-            gift_id = int(args[0])
-            if gift_id not in self.gift_ids:
-                self.gift_ids.append(gift_id)
-                self._save_gifts()
-                await utils.answer(message, self.strings("gift_added").format(gift_id))
-            else:
-                await utils.answer(message, f"❌ NFT подарок {gift_id} уже есть в списке")
-        except ValueError:
-            await utils.answer(message, "❌ Укажите числовой ID")
-    
-    @loader.command(
-        en_doc="Remove NFT gift ID",
-        ru_doc="Удалить ID NFT подарка"
-    )
-    async def delgift(self, message):
-        """Удалить ID NFT подарка"""
-        args = utils.get_args(message)
-        if not args:
-            await utils.answer(message, "❌ Укажите ID подарка для удаления")
-            return
-        
-        try:
-            gift_id = int(args[0])
-            if gift_id in self.gift_ids:
-                self.gift_ids.remove(gift_id)
-                self._save_gifts()
-                if self.current_index >= len(self.gift_ids) and self.gift_ids:
-                    self.current_index = 0
-                await utils.answer(message, self.strings("gift_removed").format(gift_id))
-            else:
-                await utils.answer(message, self.strings("gift_not_found").format(gift_id))
-        except ValueError:
-            await utils.answer(message, "❌ Укажите числовой ID")
-    
-    @loader.command(
-        en_doc="List NFT gifts",
-        ru_doc="Показать список NFT подарков"
-    )
-    async def giftslist(self, message):
-        """Показать список NFT подарков"""
-        if not self.gift_ids:
+        if not self.nft_gifts:
             await utils.answer(message, self.strings("no_gifts"))
             return
         
-        gifts_text = "\n".join([f"• {gid}" for gid in self.gift_ids])
-        await utils.answer(message, f"🎁 Список NFT подарков ({len(self.gift_ids)}):\n{gifts_text}")
-    
+        status_text = f"🔄 Статус: {'активен' if self.is_running else 'остановлен'}\n"
+        status_text += f"⏰ Интервал: {self.config['interval_seconds']} сек\n"
+        status_text += f"🎁 Всего NFT подарков: {len(self.nft_gifts)}\n"
+        
+        if self.nft_gifts and self.current_index < len(self.nft_gifts):
+            current_gift = self.nft_gifts[self.current_index]
+            status_text += f"📊 Текущий: {current_gift['title']} ({self.current_index + 1}/{len(self.nft_gifts)})"
+        
+        await utils.answer(message, status_text)
+
     @loader.command(
         en_doc="Set change interval",
         ru_doc="Установить интервал смены подарков"
@@ -224,26 +241,47 @@ class AutoGifts(loader.Module):
                 return
                 
             self.config["interval_seconds"] = seconds
-            await utils.answer(message, self.strings("interval_updated").format(seconds))
+            await utils.answer(message, f"✅ Интервал обновлен: {seconds} секунд")
             
         except ValueError:
             await utils.answer(message, "❌ Укажите целое число секунд")
-    
+
     @loader.command(
-        en_doc="Clear all gifts",
-        ru_doc="Очистить список подарков"
+        en_doc="Reload gifts list",
+        ru_doc="Перезагрузить список подарков"
     )
-    async def cleargifts(self, message):
-        """Очистить список подарков"""
-        if not self.gift_ids:
-            await utils.answer(message, "📭 Список подарков уже пуст")
+    async def giftreload(self, message):
+        """Перезагрузить список подарков"""
+        await utils.answer(message, self.strings("loading"))
+        self.nft_gifts = await self._get_nft_gifts()
+        
+        if not self.nft_gifts:
+            await utils.answer(message, self.strings("no_gifts"))
             return
-            
-        self.gift_ids.clear()
-        self._save_gifts()
-        self.current_index = 0
-        await utils.answer(message, "✅ Список подарков очищен")
-    
+        
+        await utils.answer(message, f"✅ Список подарков обновлен: {len(self.nft_gifts)} NFT подарков")
+
+    @loader.command(
+        en_doc="Test current gift",
+        ru_doc="Протестировать текущий подарок"
+    )
+    async def gifttest(self, message):
+        """Протестировать текущий подарок"""
+        if not self.nft_gifts:
+            self.nft_gifts = await self._get_nft_gifts()
+        
+        if not self.nft_gifts:
+            await utils.answer(message, self.strings("no_gifts"))
+            return
+        
+        current_gift = self.nft_gifts[self.current_index]
+        success = await self._set_emoji_status(current_gift['document_id'])
+        
+        if success:
+            await utils.answer(message, f"✅ Подарок установлен: {current_gift['title']}")
+        else:
+            await utils.answer(message, "❌ Ошибка при установке подарка")
+
     async def on_unload(self):
         """Остановка при выгрузке модуля"""
         if self.is_running and self.task:
@@ -252,4 +290,4 @@ class AutoGifts(loader.Module):
             try:
                 await self.task
             except asyncio.CancelledError:
-                pass 
+                pass
