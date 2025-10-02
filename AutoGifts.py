@@ -1,45 +1,81 @@
-__version__ = 7, 7, 7
-# name: AutoGifts
+__version__ = (1, 0, 0)
+
 # meta developer: @mofkomodules
-# description: Авто подарки
+# description: Автоматически меняет NFT подарок в профиле
 
 import asyncio
 import logging
-from telethon import TelegramClient
-from telethon.tl.functions.account import UpdateProfileRequest
+from telethon.tl.functions.account import UpdateEmojiStatusRequest
+from telethon.tl.types import EmojiStatus
+from .. import loader, utils
 
 logger = logging.getLogger(__name__)
 
-class GiftChanger:
-    def __init__(self, client: TelegramClient, interval: int = 3600):
-        self.client = client
-        self.interval = interval
+@loader.tds
+class GiftChangerMod(loader.Module):
+    """Автоматически меняет NFT подарок в профиле"""
+    
+    strings = {
+        "name": "GiftChanger",
+        "started": "✅ Автоматическая смена NFT подарков запущена",
+        "stopped": "✅ Автоматическая смена NFT подарков остановлена",
+        "already_running": "❌ Смена NFT подарков уже запущена",
+        "already_stopped": "❌ Смена NFT подарков уже остановлена",
+        "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
+    }
+    
+    strings_ru = {
+        "started": "✅ Автоматическая смена NFT подарков запущена",
+        "stopped": "✅ Автоматическая смена NFT подарков остановлена", 
+        "already_running": "❌ Смена NFT подарков уже запущена",
+        "already_stopped": "❌ Смена NFT подарков уже остановлена",
+        "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
+    }
+    
+    def __init__(self):
         self.is_running = False
         self.task = None
-        self.current_gift_index = 0
-        self.gifts = ["🎁", "🎄", "🎅", "🤶", "🧦", "🌟", "⭐", "✨", "❄️"]
+        self.current_index = 0
+        self.interval = 3600
         
-    async def start(self):
-        """Запуск автоматической смены подарков"""
-        if self.is_running:
-            return
+        self.gift_ids = [
+            123456789,  
+            123456790,
+            123456791,
+        ]
+    
+    async def client_ready(self, client, db):
+        self._client = client
+        me = await self._client.get_me()
+        if not me.premium:
+            logger.warning("Telegram Premium required for NFT gifts")
+    
+    async def _change_gift(self):
+        """Смена NFT подарка в профиле"""
+        try:
+            me = await self._client.get_me()
+            if not me.premium:
+                logger.error("No Telegram Premium")
+                return
             
-        self.is_running = True
-        self.task = asyncio.create_task(self._gift_loop())
-        logger.info(f"Gift changer запущен с интервалом {self.interval} сек")
-        
-    async def stop(self):
-        """Остановка автоматической смены подарков"""
-        if not self.is_running:
-            return
+            if not self.gift_ids:
+                logger.error("No gift IDs configured")
+                return
             
-        self.is_running = False
-        if self.task:
-            self.task.cancel()
-        logger.info("Gift changer остановлен")
-        
+            gift_id = self.gift_ids[self.current_index]
+            
+            await self._client(UpdateEmojiStatusRequest(
+                emoji_status=EmojiStatus(document_id=gift_id)
+            ))
+            
+            self.current_index = (self.current_index + 1) % len(self.gift_ids)
+            logger.info(f"NFT подарок обновлен: {gift_id}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при смене NFT подарка: {e}")
+    
     async def _gift_loop(self):
-        """Основной цикл смены подарков"""
+        """Основной цикл смены NFT подарков"""
         while self.is_running:
             try:
                 await self._change_gift()
@@ -47,43 +83,79 @@ class GiftChanger:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Ошибка в цикле смены подарков: {e}")
+                logger.error(f"Ошибка в цикле смены NFT подарков: {e}")
                 await asyncio.sleep(60)
     
-    async def _change_gift(self):
-        """Смена текущего подарка в профиле"""
+    @loader.command(
+        en_doc="Start automatic NFT gift changing",
+        ru_doc="Запустить автоматическую смену NFT подарков"
+    )
+    async def giftstart(self, message):
+        """Запустить автоматическую смену NFT подарков"""
+        if self.is_running:
+            await utils.answer(message, self.strings("already_running"))
+            return
+        
+        me = await self._client.get_me()
+        if not me.premium:
+            await utils.answer(message, self.strings("no_premium"))
+            return
+            
+        self.is_running = True
+        self.task = asyncio.create_task(self._gift_loop())
+        await utils.answer(message, self.strings("started"))
+    
+    @loader.command(
+        en_doc="Stop automatic NFT gift changing", 
+        ru_doc="Остановить автоматическую смену NFT подарков"
+    )
+    async def giftstop(self, message):
+        """Остановить автоматическую смену NFT подарков"""
+        if not self.is_running:
+            await utils.answer(message, self.strings("already_stopped"))
+            return
+            
+        self.is_running = False
+        if self.task:
+            self.task.cancel()
+        await utils.answer(message, self.strings("stopped"))
+    
+    @loader.command(
+        en_doc="Add NFT gift ID",
+        ru_doc="Добавить ID NFT подарка"
+    )
+    async def addgift(self, message):
+        """Добавить ID NFT подарка"""
+        args = utils.get_args(message)
+        if not args:
+            await utils.answer(message, "❌ Укажите ID подарка")
+            return
+        
         try:
-            me = await self.client.get_me()
-            current_first_name = me.first_name or ""
-            
-            # Убираем предыдущие подарки из имени
-            clean_name = current_first_name
-            for gift in self.gifts:
-                clean_name = clean_name.replace(gift, "").strip()
-            
-            # Добавляем новый подарок
-            gift = self.gifts[self.current_gift_index]
-            new_first_name = f"{clean_name} {gift}".strip()
-            
-            await self.client(UpdateProfileRequest(first_name=new_first_name))
-            
-            self.current_gift_index = (self.current_gift_index + 1) % len(self.gifts)
-            logger.debug(f"Подарок обновлен: {new_first_name}")
-            
-        except Exception as e:
-            logger.error(f"Ошибка при смене подарка: {e}")
-
-# Инициализация модуля
-async def initialize_gift_changer(client: TelegramClient, config: dict):
-    """Инициализация модуля смены подарков"""
-    logger.info("Инициализация модуля GiftChanger...")
+            gift_id = int(args[0])
+            if gift_id not in self.gift_ids:
+                self.gift_ids.append(gift_id)
+                await utils.answer(message, f"✅ NFT подарок {gift_id} добавлен")
+            else:
+                await utils.answer(message, f"❌ NFT подарок {gift_id} уже есть в списке")
+        except ValueError:
+            await utils.answer(message, "❌ Укажите числовой ID")
     
-    interval = config.get('gift_change_interval', 3600)
-    gift_changer = GiftChanger(client, interval)
+    @loader.command(
+        en_doc="List NFT gifts",
+        ru_doc="Показать список NFT подарков"
+    )
+    async def giftslist(self, message):
+        """Показать список NFT подарков"""
+        if not self.gift_ids:
+            await utils.answer(message, "📭 Список NFT подарков пуст")
+            return
+        
+        gifts_text = "\n".join([f"• {gid}" for gid in self.gift_ids])
+        await utils.answer(message, f"🎁 Список NFT подарков:\n{gifts_text}")
     
-    # Автозапуск если указано в конфиге
-    if config.get('gift_auto_start', True):
-        await gift_changer.start()
-    
-    logger.info("Модуль GiftChanger инициализирован")
-    return gift_changer
+    async def on_unload(self):
+        """Остановка при выгрузке модуля"""
+        if self.is_running and self.task:
+            self.is_running = False
+            self.task.cancel()
