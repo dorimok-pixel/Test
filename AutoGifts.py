@@ -1,45 +1,45 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 
 # meta developer: @your_username
-# description: Автоматически меняет NFT подарок в статусе
+# description: Автоматически меняет NFT подарок в статусе из коллекции
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from .. import loader, utils
 from telethon.tl.functions.account import UpdateEmojiStatusRequest
-from telethon.tl.functions.payments import GetSavedStarGiftsRequest
-from telethon.tl.types import EmojiStatus, SavedStarGift, StarGiftUnique
+from telethon.tl.types import EmojiStatus
 
 logger = logging.getLogger(__name__)
 
 @loader.tds
 class AutoGifts(loader.Module):
-    """Автоматически меняет NFT подарок в статусе"""
+    """Автоматически меняет NFT подарок в статусе из коллекции"""
     
     strings = {
         "name": "AutoGifts",
-        "started": "✅ Автоматическая смена NFT подарков запущена\n⏰ Интервал: {} секунд\n🎁 Найдено NFT: {}",
+        "started": "✅ Автоматическая смена NFT подарков запущена\n⏰ Интервал: {} секунд\n🎁 Подарков в коллекции: {}",
         "stopped": "✅ Автоматическая смена NFT подарков остановлена",
         "already_running": "❌ Смена NFT подарков уже запущена",
         "already_stopped": "❌ Смена NFT подарков уже остановлена",
         "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
-        "no_nft_gifts": "❌ В вашей коллекции нет NFT подарков",
-        "loading": "💫 Ищу NFT подарки в вашей коллекции...",
-        "gift_changed": "🎁 NFT подарок изменен: {}",
-        "error_changing": "❌ Ошибка при смене подарка: {}",
+        "no_collection": "❌ Не указана ссылка на коллекцию\nИспользуй: .agsetcollection t.me/username/c/1",
+        "loading": "💫 Загружаю коллекцию...",
+        "collection_updated": "✅ Коллекция обновлена: {} подарков",
+        "error_loading": "❌ Ошибка загрузки коллекции: {}",
     }
     
     strings_ru = {
-        "started": "✅ Автоматическая смена NFT подарков запущена\n⏰ Интервал: {} секунд\n🎁 Найдено NFT: {}",
+        "started": "✅ Автоматическая смена NFT подарков запущена\n⏰ Интервал: {} секунд\n🎁 Подарков в коллекции: {}",
         "stopped": "✅ Автоматическая смена NFT подарков остановлена", 
         "already_running": "❌ Смена NFT подарков уже запущена",
         "already_stopped": "❌ Смена NFT подарков уже остановлена",
         "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
-        "no_nft_gifts": "❌ В вашей коллекции нет NFT подарков",
-        "loading": "💫 Ищу NFT подарки в вашей коллекции...",
-        "gift_changed": "🎁 NFT подарок изменен: {}",
-        "error_changing": "❌ Ошибка при смене подарка: {}",
+        "no_collection": "❌ Не указана ссылка на коллекцию\nИспользуй: .agsetcollection t.me/username/c/1",
+        "loading": "💫 Загружаю коллекцию...",
+        "collection_updated": "✅ Коллекция обновлена: {} подарков",
+        "error_loading": "❌ Ошибка загрузки коллекции: {}",
     }
     
     def __init__(self):
@@ -49,6 +49,12 @@ class AutoGifts(loader.Module):
                 3600,
                 "Интервал смены подарков в секундах",
                 validator=loader.validators.Integer(minimum=120)
+            ),
+            loader.ConfigValue(
+                "collection_link",
+                "",
+                "Ссылка на коллекцию подарков",
+                validator=loader.validators.String()
             ),
         )
         self.is_running = False
@@ -71,46 +77,52 @@ class AutoGifts(loader.Module):
         """Сохраняет список подарков в базу данных"""
         self._db.set(__name__, "nft_gifts", self.nft_gifts)
 
-    async def _get_saved_star_gifts(self):
-        """Получает сохраненные подарки с правильными параметрами"""
+    async def _parse_collection_link(self, link: str):
+        """Парсит ссылку на коллекцию и извлекает username и ID канала"""
         try:
-            result = await self._client(GetSavedStarGiftsRequest(
-                peer=self.me,
-                offset="",
-                limit=100
-            ))
-            return result
+            # Форматы ссылок: t.me/username/c/1 или t.me/pupozermofko/c/2
+            pattern = r"t\.me/([^/]+)/c/(\d+)"
+            match = re.match(pattern, link)
+            if match:
+                username = match.group(1)
+                channel_id = int(match.group(2))
+                return username, channel_id
+            return None, None
         except Exception as e:
-            logger.error(f"Error getting saved gifts: {e}")
-            return None
+            logger.error(f"Error parsing collection link: {e}")
+            return None, None
 
-    async def _load_nft_gifts(self):
-        """Загружает NFT подарки из коллекции"""
+    async def _load_collection_gifts(self, link: str):
+        """Загружает подарки из коллекции по ссылке"""
         try:
-            result = await self._get_saved_star_gifts()
-            if not result or not hasattr(result, 'gifts'):
-                return []
+            username, channel_id = await self._parse_collection_link(link)
+            if not username or not channel_id:
+                return None, "Неверный формат ссылки"
 
+            # Получаем entity канала
+            entity = await self._client.get_entity(f"t.me/{username}")
+            
+            # Получаем сообщения из канала (коллекции)
             nft_gifts = []
-            for gift in result.gifts:
-                if (isinstance(gift, SavedStarGift) and 
-                    hasattr(gift, 'gift') and 
-                    isinstance(gift.gift, StarGiftUnique) and
-                    hasattr(gift.gift, 'document_id')):
-                    
-                    gift_title = getattr(gift.gift, 'title', f'NFT #{gift.gift.document_id}')
-                    nft_gifts.append({
-                        'document_id': gift.gift.document_id,
-                        'title': gift_title,
-                        'gift': gift
-                    })
-                    logger.info(f"Found NFT gift: {gift_title} (ID: {gift.gift.document_id})")
+            async for message in self._client.iter_messages(entity, limit=100):
+                if message.media:
+                    # Ищем document_id в медиа
+                    if hasattr(message.media, 'document'):
+                        doc_id = message.media.document.id
+                        gift_title = message.text or f"NFT #{doc_id}"
+                        
+                        nft_gifts.append({
+                            'document_id': doc_id,
+                            'title': gift_title,
+                            'message_id': message.id
+                        })
+                        logger.info(f"Found NFT in collection: {gift_title} (ID: {doc_id})")
 
-            return nft_gifts
+            return nft_gifts, None
 
         except Exception as e:
-            logger.error(f"Error loading NFT gifts: {e}")
-            return []
+            logger.error(f"Error loading collection: {e}")
+            return None, str(e)
 
     async def _set_emoji_status(self, document_id: int):
         """Устанавливает эмодзи статус"""
@@ -152,9 +164,6 @@ class AutoGifts(loader.Module):
                     logger.error(f"Error sending status message: {e}")
             else:
                 logger.error(f"Failed to set gift: {nft_gift['title']}")
-                # Пропускаем проблемный подарок
-                self.current_index = (self.current_index + 1) % len(self.nft_gifts)
-                return
             
             # Переходим к следующему подарку
             self.current_index = (self.current_index + 1) % len(self.nft_gifts)
@@ -188,18 +197,17 @@ class AutoGifts(loader.Module):
             await utils.answer(message, self.strings("no_premium"))
             return
         
-        # Загружаем список NFT подарков
-        await utils.answer(message, self.strings("loading"))
-        self.nft_gifts = await self._load_nft_gifts()
+        if not self.config["collection_link"]:
+            await utils.answer(message, self.strings("no_collection"))
+            return
         
         if not self.nft_gifts:
-            await utils.answer(message, self.strings("no_nft_gifts"))
+            await utils.answer(message, "❌ Сначала загрузите коллекцию командой .agreload")
             return
         
         self.is_running = True
         self.current_index = 0
         self.task = asyncio.create_task(self._gift_loop())
-        self._save_gifts()
         
         # Сразу устанавливаем первый подарок
         await self._change_gift()
@@ -230,42 +238,55 @@ class AutoGifts(loader.Module):
         await utils.answer(message, self.strings("stopped"))
 
     @loader.command(
-        en_doc="Reload NFT gifts list",
-        ru_doc="Перезагрузить список NFT подарков"
+        en_doc="Set collection link",
+        ru_doc="Установить ссылку на коллекцию"
     )
-    async def agreload(self, message):
-        """Перезагрузить список NFT подарков"""
-        await utils.answer(message, self.strings("loading"))
-        self.nft_gifts = await self._load_nft_gifts()
-        
-        if not self.nft_gifts:
-            await utils.answer(message, self.strings("no_nft_gifts"))
+    async def agsetcollection(self, message):
+        """Установить ссылку на коллекцию"""
+        args = utils.get_args(message)
+        if not args:
+            current_link = self.config["collection_link"]
+            if current_link:
+                await utils.answer(message, f"📚 Текущая коллекция: {current_link}")
+            else:
+                await utils.answer(message, self.strings("no_collection"))
             return
         
-        self.current_index = 0
-        self._save_gifts()
-        await utils.answer(message, f"✅ Найдено {len(self.nft_gifts)} NFT подарков")
+        link = args[0].strip()
+        if not link.startswith("t.me/"):
+            await utils.answer(message, "❌ Неверный формат ссылки. Пример: t.me/username/c/1")
+            return
+        
+        self.config["collection_link"] = link
+        await utils.answer(message, f"✅ Коллекция установлена: {link}")
 
     @loader.command(
-        en_doc="Show current status",
-        ru_doc="Показать текущий статус"
+        en_doc="Reload collection gifts",
+        ru_doc="Перезагрузить подарки из коллекции"
     )
-    async def agstatus(self, message):
-        """Показать текущий статус"""
-        status_text = (
-            f"🔄 Статус: {'активен' if self.is_running else 'остановлен'}\n"
-            f"⏰ Интервал: {self.config['interval_seconds']} сек\n"
-            f"🎁 Всего NFT подарков: {len(self.nft_gifts)}\n"
-        )
+    async def agreload(self, message):
+        """Перезагрузить подарки из коллекции"""
+        if not self.config["collection_link"]:
+            await utils.answer(message, self.strings("no_collection"))
+            return
         
-        if self.nft_gifts:
-            if self.current_index < len(self.nft_gifts):
-                current_gift = self.nft_gifts[self.current_index]
-                status_text += f"📊 Текущий: {current_gift['title']} ({self.current_index + 1}/{len(self.nft_gifts)})"
-            else:
-                status_text += "📊 Текущий: не установлен"
+        await utils.answer(message, self.strings("loading"))
         
-        await utils.answer(message, status_text)
+        nft_gifts, error = await self._load_collection_gifts(self.config["collection_link"])
+        
+        if error:
+            await utils.answer(message, self.strings("error_loading").format(error))
+            return
+        
+        if not nft_gifts:
+            await utils.answer(message, "❌ В коллекции не найдено NFT подарков")
+            return
+        
+        self.nft_gifts = nft_gifts
+        self.current_index = 0
+        self._save_gifts()
+        
+        await utils.answer(message, self.strings("collection_updated").format(len(self.nft_gifts)))
 
     @loader.command(
         en_doc="Set change interval",
@@ -298,45 +319,22 @@ class AutoGifts(loader.Module):
     async def aglist(self, message):
         """Показать список NFT подарков"""
         if not self.nft_gifts:
-            await utils.answer(message, self.strings("no_nft_gifts"))
+            await utils.answer(message, "❌ Коллекция не загружена")
             return
         
         gifts_text = "\n".join([
-            f"{i+1}. {nft['title']} (ID: {nft['document_id']}){' ← ТЕКУЩИЙ' if i == self.current_index else ''}"
+            f"{i+1}. {nft['title']} (ID: {nft['document_id']})"
             for i, nft in enumerate(self.nft_gifts)
         ])
-        await utils.answer(message, f"🎁 Список NFT подарков ({len(self.nft_gifts)}):\n\n{gifts_text}")
-
-    @loader.command(
-        en_doc="Test current NFT gift",
-        ru_doc="Протестировать текущий NFT подарок"
-    )
-    async def agtest(self, message):
-        """Протестировать текущий NFT подарок"""
-        if not self.nft_gifts:
-            await utils.answer(message, self.strings("no_nft_gifts"))
-            return
         
-        current_gift = self.nft_gifts[self.current_index]
-        success = await self._set_emoji_status(current_gift['document_id'])
-        
-        if success:
-            await utils.answer(message, f"✅ NFT подарок установлен: {current_gift['title']}")
-        else:
-            await utils.answer(message, f"❌ Ошибка при установке: {current_gift['title']}")
-
-    @loader.command(
-        en_doc="Force change to next NFT gift",
-        ru_doc="Принудительно сменить на следующий NFT подарок"
-    )
-    async def agnext(self, message):
-        """Принудительно сменить на следующий NFT подарок"""
-        if not self.nft_gifts:
-            await utils.answer(message, self.strings("no_nft_gifts"))
-            return
-        
-        await self._change_gift()
-        await utils.answer(message, "✅ Подарок принудительно изменен")
+        status = "активен" if self.is_running else "остановлен"
+        await utils.answer(message, 
+            f"🎁 Коллекция: {self.config['collection_link']}\n"
+            f"🔄 Статус: {status}\n"
+            f"📊 Подарков: {len(self.nft_gifts)}\n"
+            f"⏰ Интервал: {self.config['interval_seconds']} сек\n\n"
+            f"Список подарков:\n{gifts_text}"
+        )
 
     async def on_unload(self):
         """Остановка при выгрузке модуля"""
@@ -347,4 +345,4 @@ class AutoGifts(loader.Module):
                 await self.task
             except asyncio.CancelledError:
                 pass
-        self._save_gifts()
+        self._save_gifts() 
