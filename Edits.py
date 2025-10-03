@@ -1,4 +1,4 @@
-__version__ = (1, 3, 0)
+__version__ = (1, 2, 0)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
@@ -70,44 +70,44 @@ class MindfuleEdits(loader.Module):
             logger.error(f"Error loading videos: {e}")
             return self._videos_cache or []
 
-    async def _send_random_edit(self, call: InlineCall, retry: bool = False) -> None:
+    async def _send_random_edit(self, message: Message) -> None:
         try:
-            await call.edit(self.strings["sending"])
+            status_msg = await utils.answer(message, self.strings["sending"])
 
             videos = await self._get_videos()
             
             if not videos:
-                await call.edit(self.strings["no_videos"])
+                await utils.answer(status_msg, self.strings["no_videos"])
                 return
 
             selected_video = random.choice(videos)
             
             await self.client.send_message(
-                call.form["chat"],
+                message.peer_id,
                 message=selected_video,
-                reply_to=call.form["reply_to_msg_id"]
+                reply_to=getattr(message, "reply_to_msg_id", None)
             )
             
-            await call.edit(
+            await self.client.delete_messages(message.chat_id, [status_msg])
+            
+            await self.inline.form(
                 self.strings["sent_success"],
-                reply_markup=[
-                    [{
-                        "text": "🔄 Try Another", 
-                        "callback": self._retry_callback
-                    }],
-                    [{
-                        "text": "❌ Close", 
-                        "action": "close"
-                    }]
-                ]
+                message=message,
+                reply_markup=[[{
+                    "text": "🔄 Try Another",
+                    "callback": self._retry_callback
+                }]]
             )
                 
         except Exception as e:
             logger.error(f"Error sending edit: {e}")
-            await call.edit(self.strings["error"])
+            error_msg = await utils.answer(message, self.strings["error"])
+            await asyncio.sleep(3)
+            await self.client.delete_messages(message.chat_id, [error_msg])
 
     async def _retry_callback(self, call: InlineCall):
-        await self._send_random_edit(call, retry=True)
+        await call.delete()
+        await self._send_random_edit(call)
 
     @loader.command(
         en_doc="Send random edit",
@@ -115,11 +115,4 @@ class MindfuleEdits(loader.Module):
         alias="эдит"
     ) 
     async def redit(self, message: Message):
-        await self.inline.form(
-            self.strings["sending"],
-            message=message,
-            reply_markup=[[{
-                "text": "🔄 Search",
-                "callback": self._send_random_edit
-            }]]
-        )
+        await self._send_random_edit(message)
