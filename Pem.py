@@ -1,4 +1,4 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 3, 0)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
@@ -82,21 +82,14 @@ class MindfuleEdits(loader.Module):
             
             await self.client.delete_messages(message.chat_id, [status_msg])
             
-            sent_message = await self.client.send_message(
-                message.peer_id,
-                message=selected_video,
-                reply_to=getattr(message, "reply_to_msg_id", None)
-            )
-            
             await self.inline.form(
-                "🔄 Send another edit?",
-                message=sent_message,
-                reply_markup=[[
-                    {
-                        "text": "🔄 Another edit",
+                message=selected_video,
+                reply_markup=[
+                    [{
+                        "text": "🔄 Another edit", 
                         "callback": self._retry_callback
-                    }
-                ]]
+                    }]
+                ]
             )
                 
         except Exception as e:
@@ -105,13 +98,8 @@ class MindfuleEdits(loader.Module):
 
     async def _retry_callback(self, call: InlineCall):
         """Колбек для кнопки повторного поиска"""
-        await call.delete()
-        fake_msg = type('FakeMsg', (), {
-            'peer_id': call.form['chat'],
-            'chat_id': call.form['chat'],
-            'reply_to_msg_id': None
-        })()
-        await self._send_random_edit(fake_msg)
+        await call.edit(self.strings["sending"])
+        await self._send_random_edit(call)
 
     @loader.command(
         en_doc="Send random edit",
