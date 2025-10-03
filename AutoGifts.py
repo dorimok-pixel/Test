@@ -1,4 +1,4 @@
-__version__ = (1, 0, 1)
+__version__ = (7, 0, 0)
 
 # meta developer: @your_username
 # description: Автоматически меняет NFT подарок в статусе из коллекции
@@ -10,6 +10,8 @@ from datetime import datetime
 from .. import loader, utils
 from telethon.tl.functions.account import UpdateEmojiStatusRequest
 from telethon.tl.types import EmojiStatus
+from telethon.tl.functions.messages import GetStickerSetRequest
+from telethon.tl.types import InputStickerSetShortName
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +26,11 @@ class AutoGifts(loader.Module):
         "already_running": "❌ Смена NFT подарков уже запущена",
         "already_stopped": "❌ Смена NFT подарков уже остановлена",
         "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
-        "no_collection": "❌ Не указана ссылка на коллекцию\nИспользуй: .agsetcollection t.me/username/c/1",
+        "no_collection": "❌ Не указана ссылка на коллекцию\nИспользуй: .agsetcollection t.me/addemoji/CollectionName",
         "loading": "💫 Загружаю коллекцию...",
-        "collection_updated": "✅ Коллекция обновлена: {} подарков",
+        "collection_updated": "✅ Коллекция обновлена: {} кастомных эмодзи",
         "error_loading": "❌ Ошибка загрузки коллекции: {}",
+        "no_custom_emojis": "❌ В коллекции не найдено кастомных эмодзи",
     }
     
     strings_ru = {
@@ -36,10 +39,11 @@ class AutoGifts(loader.Module):
         "already_running": "❌ Смена NFT подарков уже запущена",
         "already_stopped": "❌ Смена NFT подарков уже остановлена",
         "no_premium": "❌ Требуется Telegram Premium для использования NFT подарков",
-        "no_collection": "❌ Не указана ссылка на коллекцию\nИспользуй: .agsetcollection t.me/username/c/1",
+        "no_collection": "❌ Не указана ссылка на коллекцию\nИспользуй: .agsetcollection t.me/addemoji/CollectionName",
         "loading": "💫 Загружаю коллекцию...",
-        "collection_updated": "✅ Коллекция обновлена: {} подарков",
+        "collection_updated": "✅ Коллекция обновлена: {} кастомных эмодзи",
         "error_loading": "❌ Ошибка загрузки коллекции: {}",
+        "no_custom_emojis": "❌ В коллекции не найдено кастомных эмодзи",
     }
     
     def __init__(self):
@@ -51,77 +55,63 @@ class AutoGifts(loader.Module):
                 validator=loader.validators.Integer(minimum=120)
             ),
             loader.ConfigValue(
-                "collection_link",
+                "collection_name",
                 "",
-                "Ссылка на коллекцию подарков",
+                "Название коллекции кастомных эмодзи",
                 validator=loader.validators.String()
             ),
         )
         self.is_running = False
         self.task = None
         self.current_index = 0
-        self.nft_gifts = []
+        self.custom_emojis = []
         self.me = None
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
         self.me = await self._client.get_me()
-        # Загружаем список подарков из базы данных
-        self.nft_gifts = self._db.get(__name__, "nft_gifts", [])
+        # Загружаем список эмодзи из базы данных
+        self.custom_emojis = self._db.get(__name__, "custom_emojis", [])
         
         if not self.me.premium:
-            logger.warning("Telegram Premium required for NFT gifts")
+            logger.warning("Telegram Premium required for custom emojis")
 
-    def _save_gifts(self):
-        """Сохраняет список подарков в базу данных"""
-        self._db.set(__name__, "nft_gifts", self.nft_gifts)
+    def _save_emojis(self):
+        """Сохраняет список эмодзи в базу данных"""
+        self._db.set(__name__, "custom_emojis", self.custom_emojis)
 
-    async def _parse_collection_link(self, link: str):
-        """Парсит ссылку на коллекцию и извлекает username и ID канала"""
+    async def _load_custom_emojis(self, collection_name: str):
+        """Загружает кастомные эмодзи из набора"""
         try:
-            # Форматы ссылок: t.me/username/c/1 или t.me/pupozermofko/c/2
-            pattern = r"t\.me/([^/]+)/c/(\d+)"
-            match = re.match(pattern, link)
-            if match:
-                username = match.group(1)
-                channel_id = int(match.group(2))
-                return username, channel_id
-            return None, None
-        except Exception as e:
-            logger.error(f"Error parsing collection link: {e}")
-            return None, None
-
-    async def _load_collection_gifts(self, link: str):
-        """Загружает подарки из коллекции по ссылке"""
-        try:
-            username, channel_id = await self._parse_collection_link(link)
-            if not username or not channel_id:
-                return None, "Неверный формат ссылки"
-
-            # Получаем entity канала
-            entity = await self._client.get_entity(f"t.me/{username}")
+            # Получаем набор стикеров (кастомных эмодзи)
+            sticker_set = await self._client(GetStickerSetRequest(
+                stickerset=InputStickerSetShortName(short_name=collection_name),
+                hash=0
+            ))
             
-            # Получаем сообщения из канала (коллекции)
-            nft_gifts = []
-            async for message in self._client.iter_messages(entity, limit=100):
-                if message.media:
-                    # Ищем document_id в медиа
-                    if hasattr(message.media, 'document'):
-                        doc_id = message.media.document.id
-                        gift_title = message.text or f"NFT #{doc_id}"
-                        
-                        nft_gifts.append({
-                            'document_id': doc_id,
-                            'title': gift_title,
-                            'message_id': message.id
-                        })
-                        logger.info(f"Found NFT in collection: {gift_title} (ID: {doc_id})")
+            custom_emojis = []
+            for document in sticker_set.documents:
+                if hasattr(document, 'id'):
+                    # Получаем текст эмодзи из атрибутов
+                    emoji_text = "❓"
+                    if hasattr(document, 'attributes'):
+                        for attr in document.attributes:
+                            if hasattr(attr, 'alt'):
+                                emoji_text = attr.alt
+                                break
+                    
+                    custom_emojis.append({
+                        'document_id': document.id,
+                        'emoji': emoji_text,
+                        'title': f"{emoji_text} {collection_name}"
+                    })
+                    logger.info(f"Found custom emoji: {emoji_text} (ID: {document.id})")
 
-            return nft_gifts, None
+            return custom_emojis, None
 
         except Exception as e:
-            logger.error(f"Error loading collection: {e}")
+            logger.error(f"Error loading custom emojis: {e}")
             return None, str(e)
 
     async def _set_emoji_status(self, document_id: int):
@@ -136,43 +126,42 @@ class AutoGifts(loader.Module):
             return False
 
     async def _change_gift(self):
-        """Смена текущего NFT подарка в статусе"""
+        """Смена текущего кастомного эмодзи в статусе"""
         try:
-            if not self.nft_gifts:
-                logger.warning("No NFT gifts available")
+            if not self.custom_emojis:
+                logger.warning("No custom emojis available")
                 return
 
-            # Выбираем следующий подарок
-            nft_gift = self.nft_gifts[self.current_index]
+            # Выбираем следующий эмодзи
+            emoji_data = self.custom_emojis[self.current_index]
             
             # Устанавливаем как emoji статус
-            success = await self._set_emoji_status(nft_gift['document_id'])
+            success = await self._set_emoji_status(emoji_data['document_id'])
             
             if success:
-                logger.info(f"Gift changed: {nft_gift['title']}")
-                # Уведомляем в лс о смене подарка
+                logger.info(f"Emoji changed: {emoji_data['emoji']}")
+                # Уведомляем в лс о смене эмодзи
                 try:
                     status_msg = (
-                        f"🎁 **NFT подарок изменен**\n\n"
-                        f"💎 {nft_gift['title']}\n"
-                        f"🆔 ID: {nft_gift['document_id']}\n"
-                        f"📊 {self.current_index + 1}/{len(self.nft_gifts)}\n"
+                        f"🎁 **Эмодзи статус изменен**\n\n"
+                        f"{emoji_data['emoji']} {emoji_data['title']}\n"
+                        f"📊 {self.current_index + 1}/{len(self.custom_emojis)}\n"
                         f"⏰ {datetime.now().strftime('%H:%M:%S')}"
                     )
                     await self._client.send_message(self.me.id, status_msg)
                 except Exception as e:
                     logger.error(f"Error sending status message: {e}")
             else:
-                logger.error(f"Failed to set gift: {nft_gift['title']}")
+                logger.error(f"Failed to set emoji: {emoji_data['emoji']}")
             
-            # Переходим к следующему подарку
-            self.current_index = (self.current_index + 1) % len(self.nft_gifts)
+            # Переходим к следующему эмодзи
+            self.current_index = (self.current_index + 1) % len(self.custom_emojis)
             
         except Exception as e:
-            logger.error(f"Error changing gift: {e}")
+            logger.error(f"Error changing emoji: {e}")
 
     async def _gift_loop(self):
-        """Основной цикл смены подарков"""
+        """Основной цикл смены эмодзи"""
         while self.is_running:
             try:
                 await self._change_gift()
@@ -180,15 +169,15 @@ class AutoGifts(loader.Module):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in gift loop: {e}")
+                logger.error(f"Error in emoji loop: {e}")
                 await asyncio.sleep(60)
 
     @loader.command(
-        en_doc="Start automatic NFT gift changing",
-        ru_doc="Запустить автоматическую смену NFT подарков"
+        en_doc="Start automatic emoji changing",
+        ru_doc="Запустить автоматическую смену эмодзи"
     )
     async def agstart(self, message):
-        """Запустить автоматическую смену NFT подарков"""
+        """Запустить автоматическую смену эмодзи"""
         if self.is_running:
             await utils.answer(message, self.strings("already_running"))
             return
@@ -197,32 +186,32 @@ class AutoGifts(loader.Module):
             await utils.answer(message, self.strings("no_premium"))
             return
         
-        if not self.config["collection_link"]:
+        if not self.config["collection_name"]:
             await utils.answer(message, self.strings("no_collection"))
             return
         
-        if not self.nft_gifts:
-            await utils.answer(message, "❌ Сначала загрузите коллекцию командой .agreload")
+        if not self.custom_emojis:
+            await utils.answer(message, "❌ Сначала загрузите эмодзи командой .agreload")
             return
         
         self.is_running = True
         self.current_index = 0
         self.task = asyncio.create_task(self._gift_loop())
         
-        # Сразу устанавливаем первый подарок
+        # Сразу устанавливаем первый эмодзи
         await self._change_gift()
         
         await utils.answer(message, self.strings("started").format(
             self.config["interval_seconds"], 
-            len(self.nft_gifts)
+            len(self.custom_emojis)
         ))
 
     @loader.command(
-        en_doc="Stop automatic NFT gift changing", 
-        ru_doc="Остановить автоматическую смену NFT подарков"
+        en_doc="Stop automatic emoji changing", 
+        ru_doc="Остановить автоматическую смену эмодзи"
     )
     async def agstop(self, message):
-        """Остановить автоматическую смену NFT подарков"""
+        """Остановить автоматическую смену эмодзи"""
         if not self.is_running:
             await utils.answer(message, self.strings("already_stopped"))
             return
@@ -238,55 +227,51 @@ class AutoGifts(loader.Module):
         await utils.answer(message, self.strings("stopped"))
 
     @loader.command(
-        en_doc="Set collection link",
-        ru_doc="Установить ссылку на коллекцию"
+        en_doc="Set collection name",
+        ru_doc="Установить название коллекции"
     )
     async def agsetcollection(self, message):
-        """Установить ссылку на коллекцию"""
+        """Установить название коллекции"""
         args = utils.get_args(message)
         if not args:
-            current_link = self.config["collection_link"]
-            if current_link:
-                await utils.answer(message, f"📚 Текущая коллекция: {current_link}")
+            current_name = self.config["collection_name"]
+            if current_name:
+                await utils.answer(message, f"📚 Текущая коллекция: {current_name}")
             else:
                 await utils.answer(message, self.strings("no_collection"))
             return
         
-        link = args[0].strip()
-        if not link.startswith("t.me/"):
-            await utils.answer(message, "❌ Неверный формат ссылки. Пример: t.me/username/c/1")
-            return
-        
-        self.config["collection_link"] = link
-        await utils.answer(message, f"✅ Коллекция установлена: {link}")
+        collection_name = args[0].strip()
+        self.config["collection_name"] = collection_name
+        await utils.answer(message, f"✅ Коллекция установлена: {collection_name}")
 
     @loader.command(
-        en_doc="Reload collection gifts",
-        ru_doc="Перезагрузить подарки из коллекции"
+        en_doc="Reload custom emojis",
+        ru_doc="Перезагрузить кастомные эмодзи"
     )
     async def agreload(self, message):
-        """Перезагрузить подарки из коллекции"""
-        if not self.config["collection_link"]:
+        """Перезагрузить кастомные эмодзи"""
+        if not self.config["collection_name"]:
             await utils.answer(message, self.strings("no_collection"))
             return
         
         await utils.answer(message, self.strings("loading"))
         
-        nft_gifts, error = await self._load_collection_gifts(self.config["collection_link"])
+        custom_emojis, error = await self._load_custom_emojis(self.config["collection_name"])
         
         if error:
             await utils.answer(message, self.strings("error_loading").format(error))
             return
         
-        if not nft_gifts:
-            await utils.answer(message, "❌ В коллекции не найдено NFT подарков")
+        if not custom_emojis:
+            await utils.answer(message, self.strings("no_custom_emojis"))
             return
         
-        self.nft_gifts = nft_gifts
+        self.custom_emojis = custom_emojis
         self.current_index = 0
-        self._save_gifts()
+        self._save_emojis()
         
-        await utils.answer(message, self.strings("collection_updated").format(len(self.nft_gifts)))
+        await utils.answer(message, self.strings("collection_updated").format(len(self.custom_emojis)))
 
     @loader.command(
         en_doc="Set change interval",
@@ -313,27 +298,26 @@ class AutoGifts(loader.Module):
             await utils.answer(message, "❌ Укажите целое число секунд")
 
     @loader.command(
-        en_doc="Show NFT gifts list",
-        ru_doc="Показать список NFT подарков"
+        en_doc="Show emojis list",
+        ru_doc="Показать список эмодзи"
     )
     async def aglist(self, message):
-        """Показать список NFT подарков"""
-        if not self.nft_gifts:
+        """Показать список эмодзи"""
+        if not self.custom_emojis:
             await utils.answer(message, "❌ Коллекция не загружена")
             return
         
-        gifts_text = "\n".join([
-            f"{i+1}. {nft['title']} (ID: {nft['document_id']})"
-            for i, nft in enumerate(self.nft_gifts)
+        emojis_text = "\n".join([
+            f"{i+1}. {emoji['emoji']} - {emoji['title']}"
+            for i, emoji in enumerate(self.custom_emojis)
         ])
         
-        status = "активен" if self.is_running else "остановлен"
         await utils.answer(message, 
-            f"🎁 Коллекция: {self.config['collection_link']}\n"
-            f"🔄 Статус: {status}\n"
-            f"📊 Подарков: {len(self.nft_gifts)}\n"
+            f"🎁 Коллекция: {self.config['collection_name']}\n"
+            f"🔄 Статус: {'активен' if self.is_running else 'остановлен'}\n"
+            f"📊 Эмодзи: {len(self.custom_emojis)}\n"
             f"⏰ Интервал: {self.config['interval_seconds']} сек\n\n"
-            f"Список подарков:\n{gifts_text}"
+            f"Список эмодзи:\n{emojis_text}"
         )
 
     async def on_unload(self):
@@ -345,4 +329,4 @@ class AutoGifts(loader.Module):
                 await self.task
             except asyncio.CancelledError:
                 pass
-        self._save_gifts() 
+        self._save_emojis() 
