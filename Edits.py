@@ -1,10 +1,9 @@
-__version__ = (2, 2, 0)
+__version__ = (1, 2, 0)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
 from herokutl.types import Message
 from .. import loader, utils
-from ..inline.types import InlineCall
 import random
 import asyncio
 import logging
@@ -82,30 +81,21 @@ class MindfuleEdits(loader.Module):
             
             await self.client.delete_messages(message.chat_id, [status_msg])
             
-            sent_message = await self.client.send_message(
+            await self.client.send_message(
                 message.peer_id,
                 message=selected_video,
-                reply_to=getattr(message, "reply_to_msg_id", None)
-            )
-            
-            await self.inline.form(
-                "🔄 Send another edit?",
-                message=sent_message,
-                reply_markup=[[
+                reply_to=getattr(message, "reply_to_msg_id", None),
+                reply_markup=self.client.build_reply_markup([[
                     {
                         "text": "🔄 Another edit",
-                        "callback": self._retry_callback
+                        "input": ".redit"
                     }
-                ]]
+                ]])
             )
                 
         except Exception as e:
             logger.error(f"Error sending edit: {e}")
             await utils.answer(message, self.strings["error"])
-
-    async def _retry_callback(self, call: InlineCall):
-        await call.delete()
-        await self._send_random_edit(call)
 
     @loader.command(
         en_doc="Send random edit",
