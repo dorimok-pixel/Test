@@ -1,4 +1,4 @@
-__version__ = (1, 2, 1)
+__version__ = (6, 6, 6)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
@@ -81,16 +81,13 @@ class MindfuleEdits(loader.Module):
             
             await self.client.delete_messages(message.chat_id, [status_msg])
             
+            button = self.client.buttons.get_input_button("🔄 Another edit", ".redit")
+            
             await self.client.send_message(
                 message.peer_id,
                 message=selected_video,
                 reply_to=getattr(message, "reply_to_msg_id", None),
-                reply_markup=self.client.build_reply_markup([[
-                    {
-                        "text": "🔄 Another edit",
-                        "input": ".redit"
-                    }
-                ]])
+                buttons=button
             )
                 
         except Exception as e:
