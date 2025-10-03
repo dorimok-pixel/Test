@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (2, 0, 0)
 
 # meta developer: @your_username
 # description: Умные уведомления о подарках и звездах
@@ -12,12 +12,7 @@ from .. import loader, utils
 from telethon.tl.functions.payments import (
     GetSavedStarGiftsRequest,
     GetResaleStarGiftsRequest,
-    GetStarGiftCollectionsRequest,
-    GetStarGiftsRequest,
-    GetGiveawayInfoRequest,
-    GetStarsTransactionsRequest,
-    GetUniqueStarGiftRequest,
-    GetStarsRevenueStatsRequest
+    GetStarGiftsRequest
 )
 from telethon.tl.types import (
     SavedStarGift,
@@ -79,18 +74,6 @@ class GiftNotifier(loader.Module):
                 validator=loader.validators.Boolean()
             ),
             loader.ConfigValue(
-                "track_collections",
-                True,
-                "Отслеживать новые коллекции",
-                validator=loader.validators.Boolean()
-            ),
-            loader.ConfigValue(
-                "track_giveaways",
-                True,
-                "Отслеживать розыгрыши",
-                validator=loader.validators.Boolean()
-            ),
-            loader.ConfigValue(
                 "track_personal_gifts",
                 True,
                 "Отслеживать личные подарки",
@@ -112,11 +95,8 @@ class GiftNotifier(loader.Module):
         
         self.is_running = False
         self.task = None
-        self.last_check = {}
         self.price_history = {}
-        self.collection_cache = set()
         self.gift_cache = set()
-        self.giveaway_cache = set()
         self.personal_gifts_cache = set()
         self.notification_stats = defaultdict(int)
         self.last_stats_reset = datetime.now()
@@ -129,16 +109,12 @@ class GiftNotifier(loader.Module):
 
     def _load_cache(self):
         """Загружает кэш из базы данных"""
-        self.collection_cache = set(self._db.get(__name__, "collection_cache", []))
         self.gift_cache = set(self._db.get(__name__, "gift_cache", []))
-        self.giveaway_cache = set(self._db.get(__name__, "giveaway_cache", []))
         self.personal_gifts_cache = set(self._db.get(__name__, "personal_gifts_cache", []))
 
     def _save_cache(self):
         """Сохраняет кэш в базу данных"""
-        self._db.set(__name__, "collection_cache", list(self.collection_cache))
         self._db.set(__name__, "gift_cache", list(self.gift_cache))
-        self._db.set(__name__, "giveaway_cache", list(self.giveaway_cache))
         self._db.set(__name__, "personal_gifts_cache", list(self.personal_gifts_cache))
 
     async def _send_notification(self, title: str, message: str, alert_type: str = "info"):
@@ -153,8 +129,6 @@ class GiftNotifier(loader.Module):
             emoji_map = {
                 "price": "💸",
                 "new": "🎁", 
-                "collection": "🆕",
-                "giveaway": "🎉",
                 "personal": "🎯",
                 "info": "ℹ️"
             }
@@ -166,7 +140,7 @@ class GiftNotifier(loader.Module):
             if self.config["notify_channel"]:
                 await self._client.send_message(int(self.config["notify_channel"]), final_message)
             else:
-                await self.respond(final_message)
+                await utils.answer(message, final_message)
                 
             logger.info(f"Notification sent: {title}")
             
@@ -248,40 +222,6 @@ class GiftNotifier(loader.Module):
         except Exception as e:
             logger.error(f"Error checking new gifts: {e}")
 
-    async def _check_new_collections(self):
-        """Проверяет новые коллекции"""
-        if not self.config["track_collections"]:
-            return
-
-        try:
-            collections = await self._client(GetStarGiftCollectionsRequest())
-            
-            current_collections = set()
-            for collection in getattr(collections, 'collections', []):
-                if hasattr(collection, 'id'):
-                    current_collections.add(collection.id)
-                    
-                    # Проверяем новая ли это коллекция
-                    if collection.id not in self.collection_cache:
-                        collection_title = getattr(collection, 'title', f'Коллекция #{collection.id}')
-                        message = (
-                            f"📚 {collection_title}\n"
-                            f"🎨 Новая коллекция подарков\n"
-                            f"🔍 Изучите доступные подарки"
-                        )
-                        await self._send_notification(
-                            "Новая коллекция",
-                            message,
-                            "collection"
-                        )
-
-            # Обновляем кэш
-            self.collection_cache = current_collections
-            self._save_cache()
-
-        except Exception as e:
-            logger.error(f"Error checking new collections: {e}")
-
     async def _check_personal_gifts(self):
         """Проверяет личные подарки"""
         if not self.config["track_personal_gifts"]:
@@ -327,7 +267,6 @@ class GiftNotifier(loader.Module):
                 await asyncio.gather(
                     self._check_price_changes(),
                     self._check_new_gifts(),
-                    self._check_new_collections(),
                     self._check_personal_gifts(),
                     return_exceptions=True
                 )
@@ -361,12 +300,8 @@ class GiftNotifier(loader.Module):
             enabled_trackers.append("💰 Цены")
         if self.config["track_new_gifts"]:
             enabled_trackers.append("🎁 Новые подарки")
-        if self.config["track_collections"]:
-            enabled_trackers.append("📚 Коллекции")
         if self.config["track_personal_gifts"]:
             enabled_trackers.append("🎯 Личные подарки")
-        if self.config["track_giveaways"]:
-            enabled_trackers.append("🎉 Розыгрыши")
         
         if not enabled_trackers:
             await utils.answer(message, self.strings("no_tracking"))
@@ -385,7 +320,7 @@ class GiftNotifier(loader.Module):
     async def giftnotifystop(self, message):
         """Остановить уведомления о подарках"""
         if not self.is_running:
-            await utils.answer(message, self.strings("already_stopped"))
+            await utils.answer(message, "❌ GiftNotifier уже остановлен")
             return
             
         self.is_running = False
@@ -408,9 +343,7 @@ class GiftNotifier(loader.Module):
             f"⏰ Интервал проверки: {self.config['check_interval']} сек\n"
             f"💰 Отслеживать цены: {'✅' if self.config['track_price_changes'] else '❌'}\n"
             f"🎁 Новые подарки: {'✅' if self.config['track_new_gifts'] else '❌'}\n"
-            f"📚 Новые коллекции: {'✅' if self.config['track_collections'] else '❌'}\n"
             f"🎯 Личные подарки: {'✅' if self.config['track_personal_gifts'] else '❌'}\n"
-            f"🎉 Розыгрыши: {'✅' if self.config['track_giveaways'] else '❌'}\n"
             f"📊 Мин. изменение цены: {self.config['min_price_change_percent']}%\n"
             f"📢 Канал уведомлений: {self.config['notify_channel'] or 'Текущий чат'}"
         )
@@ -430,7 +363,6 @@ class GiftNotifier(loader.Module):
         stats_text = "\n".join([
             f"💸 Изменения цен: {self.notification_stats.get('price', 0)}",
             f"🎁 Новые подарки: {self.notification_stats.get('new', 0)}",
-            f"📚 Новые коллекции: {self.notification_stats.get('collection', 0)}",
             f"🎯 Личные подарки: {self.notification_stats.get('personal', 0)}",
             f"ℹ️ Прочие: {self.notification_stats.get('info', 0)}",
             f"📅 Всего сегодня: {sum(self.notification_stats.values())}"
@@ -444,9 +376,7 @@ class GiftNotifier(loader.Module):
     )
     async def giftnotifyclear(self, message):
         """Очистить кэш уведомлений"""
-        self.collection_cache.clear()
         self.gift_cache.clear()
-        self.giveaway_cache.clear()
         self.personal_gifts_cache.clear()
         self.price_history.clear()
         self._save_cache()
@@ -462,4 +392,4 @@ class GiftNotifier(loader.Module):
                 await self.task
             except asyncio.CancelledError:
                 pass
-        self._save_cache() 
+        self._save_cache()
