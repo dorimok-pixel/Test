@@ -1,10 +1,9 @@
-__version__ = (1, 4, 0)
+__version__ = (1, 6, 6)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
 from herokutl.types import Message
 from .. import loader, utils
-from ..inline.types import InlineCall
 import random
 import asyncio
 import logging
@@ -20,14 +19,12 @@ class MindfuleEdits(loader.Module):
         "sending": "<emoji document_id=5210956306952758910>👀</emoji> Looking for edit",
         "error": "<emoji document_id=5420323339723881652>⚠️</emoji> An error occurred, check logs",
         "no_videos": "<emoji document_id=5400086192559503700>😳</emoji> No videos found in channel",
-        "sent_success": "<emoji document_id=5206607081334906820>✔️</emoji> Edit sent",
     }
     
     strings_ru = {
         "sending": "<emoji document_id=5210956306952758910>👀</emoji> Ищу эдит",
         "error": "<emoji document_id=5420323339723881652>⚠️</emoji> Ошибка, проверьте логи",
         "no_videos": "<emoji document_id=5400086192559503700>😳</emoji> В канале не найдено видео",
-        "sent_success": "<emoji document_id=5206607081334906820>✔️</emoji> Эдит отправлен",
     }
 
     def __init__(self):
@@ -82,21 +79,18 @@ class MindfuleEdits(loader.Module):
 
             selected_video = random.choice(videos)
             
+            await self.client.delete_messages(message.chat_id, [status_msg])
+            
             await self.client.send_message(
                 message.peer_id,
                 message=selected_video,
-                reply_to=getattr(message, "reply_to_msg_id", None)
-            )
-            
-            await self.client.delete_messages(message.chat_id, [status_msg])
-            
-            await self.inline.form(
-                self.strings["sent_success"],
-                message=message,
-                reply_markup=[[{
-                    "text": "🔄 Try Another",
-                    "callback": self._retry_callback
-                }]]
+                reply_to=getattr(message, "reply_to_msg_id", None),
+                buttons=[[
+                    {
+                        "text": "🔄 Another edit",
+                        "data": b"redit"
+                    }
+                ]]
             )
                 
         except Exception as e:
@@ -105,10 +99,6 @@ class MindfuleEdits(loader.Module):
             await asyncio.sleep(3)
             await self.client.delete_messages(message.chat_id, [error_msg])
 
-    async def _retry_callback(self, call: InlineCall):
-        await call.delete()
-        await self._send_random_edit(call)
-
     @loader.command(
         en_doc="Send random edit",
         ru_doc="Отправить рандомный эдит",
@@ -116,3 +106,9 @@ class MindfuleEdits(loader.Module):
     ) 
     async def redit(self, message: Message):
         await self._send_random_edit(message)
+
+    @loader.watcher(only_buttons=True)
+    async def watcher(self, message: Message):
+        if hasattr(message, "data") and message.data == b"redit":
+            await message.delete()
+            await self._send_random_edit(message)
