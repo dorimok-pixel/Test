@@ -1,4 +1,4 @@
-__version__ = (1, 3, 0)
+__version__ = (1, 2, 0)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
@@ -70,17 +70,32 @@ class MindfuleEdits(loader.Module):
 
     async def _send_random_edit(self, message: Message) -> None:
         try:
-            status_msg = await utils.answer(message, self.strings["sending"])
+            if isinstance(message, InlineCall):
+                # Если это колбек из кнопки, создаем фиктивное сообщение
+                fake_msg = type('FakeMsg', (), {
+                    'peer_id': message.form['chat'],
+                    'chat_id': message.form['chat'],
+                    'reply_to_msg_id': None
+                })()
+                message = fake_msg
+
+            # Отправляем статус только если это не колбек
+            if not isinstance(message, InlineCall):
+                status_msg = await utils.answer(message, self.strings["sending"])
+            else:
+                status_msg = None
 
             videos = await self._get_videos()
             
             if not videos:
-                await utils.answer(status_msg, self.strings["no_videos"])
+                if status_msg:
+                    await utils.answer(status_msg, self.strings["no_videos"])
                 return
 
             selected_video = random.choice(videos)
             
-            await self.client.delete_messages(message.chat_id, [status_msg])
+            if status_msg:
+                await self.client.delete_messages(message.chat_id, [status_msg])
             
             # Отправляем эдит
             await self.client.send_message(
@@ -105,7 +120,8 @@ class MindfuleEdits(loader.Module):
                 
         except Exception as e:
             logger.error(f"Error sending edit: {e}")
-            await utils.answer(message, self.strings["error"])
+            if not isinstance(message, InlineCall):
+                await utils.answer(message, self.strings["error"])
 
     async def _retry_callback(self, call: InlineCall):
         """Колбек для кнопки повторного поиска"""
