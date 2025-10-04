@@ -1,4 +1,4 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 3, 0)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
@@ -82,22 +82,24 @@ class MindfuleEdits(loader.Module):
             
             await self.client.delete_messages(message.chat_id, [status_msg])
             
+            # Отправляем эдит
             await self.client.send_message(
                 message.peer_id,
                 message=selected_video,
                 reply_to=getattr(message, "reply_to_msg_id", None)
             )
             
+            # Ждем 2 секунды
             await asyncio.sleep(2)
             
+            # Отправляем инлайн кнопку отдельным сообщением
             await self.inline.form(
-                "🔄 Отправить другой эдит?",
+                text="🔄 Отправить другой эдит?",
                 message=message,
                 reply_markup=[
-                    [{
-                        "text": "🔄 Другой эдит", 
-                        "callback": self._retry_callback
-                    }]
+                    [
+                        {"text": "🔄 Другой эдит", "callback": self._retry_callback}
+                    ]
                 ]
             )
                 
@@ -116,4 +118,4 @@ class MindfuleEdits(loader.Module):
         alias="эдит"
     ) 
     async def redit(self, message: Message):
-        await self._send_random_edit(message) 
+        await self._send_random_edit(message)
