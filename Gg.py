@@ -1,6 +1,6 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 1, 0)
 # meta developer: @mofkomodules 
-# name: MindfuleEdits
+# name: MindfulEdit
 
 from herokutl.types import Message
 from .. import loader, utils
@@ -14,9 +14,9 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 @loader.tds
-class MindfuleEdits(loader.Module):
+class MindfulEdit(loader.Module):
     strings = {
-        "name": "MindfuleEdits",
+        "name": "MindfulEdit",
         "sending": "<emoji document_id=5210956306952758910>👀</emoji> Looking for edit",
         "error": "<emoji document_id=5420323339723881652>⚠️</emoji> An error occurred, check logs",
         "no_videos": "<emoji document_id=5400086192559503700>😳</emoji> No videos found in channel",
@@ -105,7 +105,6 @@ class MindfuleEdits(loader.Module):
             await utils.answer(message, self.strings["error"])
 
     async def _retry_callback(self, call: InlineCall):
-        """Колбек для кнопки повторного поиска"""
         await call.delete()
         prefix = self.get_prefix()
         await self.client.send_message(call.form["chat"], f"{prefix}redit")
