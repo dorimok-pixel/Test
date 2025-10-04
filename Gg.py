@@ -1,4 +1,4 @@
-__version__ = (2, 2, 0)
+__version__ = (1, 2, 0)
 # meta developer: @mofkomodules 
 # name: MindfuleEdits
 
@@ -82,17 +82,14 @@ class MindfuleEdits(loader.Module):
             
             await self.client.delete_messages(message.chat_id, [status_msg])
             
-            # Отправляем эдит
             await self.client.send_message(
                 message.peer_id,
                 message=selected_video,
                 reply_to=getattr(message, "reply_to_msg_id", None)
             )
             
-            # Ждем 2 секунды
             await asyncio.sleep(2)
             
-            # Отправляем инлайн кнопку отдельным сообщением
             await self.inline.form(
                 text="🔄 Отправить другой эдит?",
                 message=message,
@@ -110,8 +107,8 @@ class MindfuleEdits(loader.Module):
     async def _retry_callback(self, call: InlineCall):
         """Колбек для кнопки повторного поиска"""
         await call.delete()
-        # Просто вызываем команду redit в том же чате
-        await self.client.send_message(call.form["chat"], ".redit")
+        prefix = self.get_prefix()
+        await self.client.send_message(call.form["chat"], f"{prefix}redit")
 
     @loader.command(
         en_doc="Send random edit",
