@@ -1,7 +1,7 @@
 # meta developer: @mofkomodules
 # name: MusicS
 
-__version__ = (1, 0, 6)
+__version__ = (1, 0, 7)
 
 import io
 import logging
@@ -83,12 +83,12 @@ class MusicSMod(loader.Module):
             
             cmd = [
                 'ffmpeg', '-i', video_path, 
-                '-vn',                    # Без видео
-                '-acodec', 'aac',         # Лучший кодек
-                '-ab', '256k',            # Высокий битрейт
-                '-ac', '2',               # Стерео
-                '-ar', '48000',           # Высокая частота
-                '-af', 'loudnorm',        # Нормализация громкости
+                '-vn',
+                '-acodec', 'aac',
+                '-ab', '256k',
+                '-ac', '2',
+                '-ar', '48000',
+                '-af', 'loudnorm',
                 '-y', audio_path
             ]
             
@@ -170,18 +170,16 @@ class MusicSMod(loader.Module):
         artist = track.get('subtitle', '')
         
         if title and artist:
-            search_query_web = f"{artist} - {title}".replace(' ', '%20')
-            search_query_deeplink = f"{artist} {title}".replace(' ', '%20')
+            search_query = f"{artist} {title}".replace(' ', '%20')
             
-            youtube_url = f"https://www.youtube.com/results?search_query={search_query_web}"
+            youtube_url = f"https://www.youtube.com/results?search_query={search_query}"
             links.append(f"📺 <a href='{youtube_url}'>YouTube</a>")
             
-            soundcloud_url = f"https://soundcloud.com/search?q={search_query_web}"
+            soundcloud_url = f"https://soundcloud.com/search?q={search_query}"
             links.append(f"☁️ <a href='{soundcloud_url}'>SoundCloud</a>")
             
-            yandex_deeplink = f"yandexmusic://search?text={search_query_deeplink}"
-            yandex_web = f"https://music.yandex.ru/search?text={search_query_deeplink}"
-            links.append(f"🎵 <a href='{yandex_deeplink}'>Яндекс Музыка</a>")
+            yandex_url = f"https://music.yandex.ru/search?text={search_query}"
+            links.append(f"🎵 <a href='{yandex_url}'>Яндекс Музыка</a>")
         
         share_data = track.get('share', {})
         if share_data.get('href'):
