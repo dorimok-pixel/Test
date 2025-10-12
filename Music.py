@@ -1,7 +1,7 @@
 # meta developer: @mofkomodules
-# name: MusicRecognizer
+# name: MusicS
 
-__version__ = (1, 0, 5)
+__version__ = (1, 0, 6)
 
 import io
 import logging
@@ -15,9 +15,9 @@ from telethon.tl.types import Message, DocumentAttributeVideo, DocumentAttribute
 logger = logging.getLogger(__name__)
 
 @loader.tds
-class MusicRecognizerMod(loader.Module):
+class MusicSMod(loader.Module):
     strings = {
-        "name": "MusicRecognizer",
+        "name": "MusicS",
         "processing": "🎵 Обрабатываю видео...",
         "no_video": "❌ Ответьте на видео сообщение",
         "recognition_failed": "❌ Не удалось распознать музыку",
@@ -25,8 +25,7 @@ class MusicRecognizerMod(loader.Module):
         "downloading": "📥 Скачиваю видео...",
         "file_too_large": "❌ Файл слишком большой (макс. {max_size} МБ)",
         "wait_cooldown": "⏳ Подождите {} секунд",
-        "extracting": "🔧 Извлекаю аудио...",
-        "shazam_error": "❌ Ошибка Shazam"
+        "extracting": "🔧 Извлекаю аудио..."
     }
 
     def __init__(self):
@@ -34,13 +33,13 @@ class MusicRecognizerMod(loader.Module):
             loader.ConfigValue(
                 "cooldown",
                 15,
-                "Задержка между запросами (секунды)",
+                "Задержка между запросами",
                 validator=loader.validators.Integer(minimum=10, maximum=60),
             ),
             loader.ConfigValue(
                 "max_file_size",
                 50,
-                "Максимальный размер файла (МБ)",
+                "Максимальный размер файла",
                 validator=loader.validators.Integer(minimum=10, maximum=100),
             ),
         )
@@ -79,12 +78,18 @@ class MusicRecognizerMod(loader.Module):
             import tempfile
             import os
             
-            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_audio:
+            with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_audio:
                 audio_path = temp_audio.name
             
             cmd = [
-                'ffmpeg', '-i', video_path, '-vn', '-acodec', 'libmp3lame',
-                '-ab', '128k', '-ac', '2', '-ar', '44100', '-y', audio_path
+                'ffmpeg', '-i', video_path, 
+                '-vn',                    # Без видео
+                '-acodec', 'aac',         # Лучший кодек
+                '-ab', '256k',            # Высокий битрейт
+                '-ac', '2',               # Стерео
+                '-ar', '48000',           # Высокая частота
+                '-af', 'loudnorm',        # Нормализация громкости
+                '-y', audio_path
             ]
             
             process = await asyncio.create_subprocess_exec(
@@ -136,7 +141,7 @@ class MusicRecognizerMod(loader.Module):
             shazam = Shazam(audio_data.read())
             recognize_generator = shazam.recognizeSong()
             
-            for _ in range(5):
+            for _ in range(8):
                 try:
                     result = next(recognize_generator)
                     if result[1].get('track'):
@@ -150,14 +155,12 @@ class MusicRecognizerMod(loader.Module):
                         }
                 except StopIteration:
                     break
-                except Exception as e:
-                    logger.error(f"Shazam iteration error: {e}")
+                except Exception:
                     continue
                     
             return None
             
-        except Exception as e:
-            logger.error(f"Shazam error: {e}")
+        except Exception:
             return None
 
     def format_links(self, track: dict) -> str:
@@ -167,19 +170,18 @@ class MusicRecognizerMod(loader.Module):
         artist = track.get('subtitle', '')
         
         if title and artist:
-            search_query = f"{artist} {title}".replace(' ', '+')
+            search_query_web = f"{artist} - {title}".replace(' ', '%20')
+            search_query_deeplink = f"{artist} {title}".replace(' ', '%20')
             
-            yandex_url = f"https://music.yandex.ru/search?text={search_query}"
-            links.append(f"🎵 <a href='{yandex_url}'>Яндекс Музыка</a>")
-            
-            youtube_url = f"https://www.youtube.com/results?search_query={search_query}"
+            youtube_url = f"https://www.youtube.com/results?search_query={search_query_web}"
             links.append(f"📺 <a href='{youtube_url}'>YouTube</a>")
             
-            spotify_url = f"https://open.spotify.com/search/{search_query}"
-            links.append(f"🎧 <a href='{spotify_url}'>Spotify</a>")
-            
-            soundcloud_url = f"https://soundcloud.com/search?q={search_query}"
+            soundcloud_url = f"https://soundcloud.com/search?q={search_query_web}"
             links.append(f"☁️ <a href='{soundcloud_url}'>SoundCloud</a>")
+            
+            yandex_deeplink = f"yandexmusic://search?text={search_query_deeplink}"
+            yandex_web = f"https://music.yandex.ru/search?text={search_query_deeplink}"
+            links.append(f"🎵 <a href='{yandex_deeplink}'>Яндекс Музыка</a>")
         
         share_data = track.get('share', {})
         if share_data.get('href'):
@@ -189,7 +191,6 @@ class MusicRecognizerMod(loader.Module):
 
     @loader.command()
     async def song(self, message: Message):
-        """Распознать музыку из видео"""
         reply = await message.get_reply_message()
         
         if not reply:
