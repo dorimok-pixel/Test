@@ -1,11 +1,10 @@
 # meta developer: @mofkomodules
 # name: MusicRecognizer
 
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 
 import asyncio
 import logging
-import base64
 from typing import Optional
 
 from .. import loader, utils
@@ -21,7 +20,6 @@ class MusicRecognizerMod(loader.Module):
         "no_video": "❌ Ответьте на видео сообщение",
         "recognition_failed": "❌ Не удалось распознать музыку",
         "recognition_success": "🎶 <b>Найдено:</b>\n\n<code>{title}</code>\n<code>{artist}</code>\n\n🔗 <b>Ссылки:</b>\n{links}",
-        "api_error": "❌ Ошибка API",
         "downloading": "📥 Скачиваю видео...",
         "file_too_large": "❌ Файл слишком большой (макс. {max_size} МБ)",
         "wait_cooldown": "⏳ Подождите {} секунд",
@@ -33,13 +31,13 @@ class MusicRecognizerMod(loader.Module):
             loader.ConfigValue(
                 "cooldown",
                 15,
-                "Задержка между запросами",
+                "Задержка между запросами (секунды)",
                 validator=loader.validators.Integer(minimum=10, maximum=60),
             ),
             loader.ConfigValue(
                 "max_file_size",
                 100,
-                "Максимальный размер файла",
+                "Максимальный размер файла (МБ)",
                 validator=loader.validators.Integer(minimum=20, maximum=500),
             ),
         )
@@ -130,69 +128,33 @@ class MusicRecognizerMod(loader.Module):
             logger.error(f"Ошибка скачивания: {e}")
             return None
 
-    async def recognize_acrcloud(self, audio_data: bytes) -> Optional[dict]:
+    async def recognize_song(self, audio_data: bytes) -> Optional[dict]:
         try:
             import aiohttp
             
-            api_url = "https://identify-us-west-2.acrcloud.com/v1/identify"
-            
-            audio_b64 = base64.b64encode(audio_data).decode()
-            
-            data = {
-                "audio": audio_b64,
-                "access_key": "demo",
-                "data_type": "audio",
-                "signature_version": "1"
-            }
-            
             async with aiohttp.ClientSession() as session:
-                async with session.post(api_url, json=data) as response:
+                form_data = aiohttp.FormData()
+                form_data.add_field('audio', audio_data, filename='audio.mp3', content_type='audio/mpeg')
+                
+                async with session.post(
+                    'https://api.audd.io/',
+                    data=form_data,
+                    params={'api_token': 'test'}  # Демо-режим
+                ) as response:
                     if response.status == 200:
                         result = await response.json()
-                        if result.get('status', {}).get('code') == 0:
-                            music_info = result.get('metadata', {}).get('music', [{}])[0]
+                        if result.get('status') == 'success' and result.get('result'):
+                            music = result['result']
                             return {
-                                'title': music_info.get('title', 'Неизвестно'),
-                                'artist': music_info.get('artists', [{}])[0].get('name', 'Неизвестно'),
-                                'links': self.format_links(music_info)
+                                'title': music.get('title', 'Неизвестно'),
+                                'artist': music.get('artist', 'Неизвестно'),
+                                'album': music.get('album', ''),
+                                'links': self.format_links(music)
                             }
             return None
 
         except Exception as e:
-            logger.error(f"Ошибка ACRCloud: {e}")
-            return None
-
-    async def recognize_musicbrainz(self, audio_data: bytes) -> Optional[dict]:
-        try:
-            import aiohttp
-            import hashlib
-            
-            audio_hash = hashlib.sha1(audio_data).hexdigest()
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"https://api.acoustid.org/v2/lookup",
-                    params={
-                        "client": "8XaBELKGh2",
-                        "meta": "recordings",
-                        "fingerprint": audio_hash
-                    }
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get('results'):
-                            result = data['results'][0]
-                            if result.get('recordings'):
-                                recording = result['recordings'][0]
-                                return {
-                                    'title': recording.get('title', 'Неизвестно'),
-                                    'artist': recording.get('artists', [{}])[0].get('name', 'Неизвестно'),
-                                    'links': self.format_links(recording)
-                                }
-            return None
-
-        except Exception as e:
-            logger.error(f"Ошибка MusicBrainz: {e}")
+            logger.error(f"Ошибка распознавания: {e}")
             return None
 
     def format_links(self, music_info: dict) -> str:
@@ -218,7 +180,8 @@ class MusicRecognizerMod(loader.Module):
         return '\n'.join(links) if links else "Ссылки не найдены"
 
     @loader.command()
-    async def recognize(self, message: Message):
+    async def song(self, message: Message):
+        """Распознать музыку из видео"""
         reply = await message.get_reply_message()
         
         if not reply:
@@ -250,9 +213,7 @@ class MusicRecognizerMod(loader.Module):
 
         await utils.answer(status_msg, self.strings["processing"])
         
-        result = await self.recognize_acrcloud(audio_data)
-        if not result:
-            result = await self.recognize_musicbrainz(audio_data)
+        result = await self.recognize_song(audio_data)
         
         if result:
             response = self.strings["recognition_success"].format(
@@ -263,33 +224,3 @@ class MusicRecognizerMod(loader.Module):
             await utils.answer(status_msg, response)
         else:
             await utils.answer(status_msg, self.strings["recognition_failed"])
-
-    @loader.command()
-    async def recset(self, message: Message):
-        args = utils.get_args_raw(message)
-        
-        if not args:
-            config_info = (
-                f"⚙️ <b>Настройки MusicRecognizer</b>\n\n"
-                f"⏱ Cooldown: {self.config['cooldown']} сек\n"
-                f"📁 Макс. размер: {self.config['max_file_size']} МБ\n\n"
-                f"<code>.recset cooldown 20</code>\n"
-                f"<code>.recset max_file_size 150</code>"
-            )
-            await utils.answer(message, config_info)
-            return
-        
-        try:
-            key, value = args.split(' ', 1)
-            if key == 'cooldown':
-                self.config['cooldown'] = int(value)
-                await utils.answer(message, f"✅ Cooldown: {value} сек")
-            elif key == 'max_file_size':
-                self.config['max_file_size'] = int(value)
-                await utils.answer(message, f"✅ Макс. размер: {value} МБ")
-            else:
-                await utils.answer(message, "❌ Неизвестный параметр")
-        except ValueError:
-            await utils.answer(message, "❌ Неверный формат")
-        except Exception as e:
-            await utils.answer(message, f"❌ Ошибка: {e}") 
