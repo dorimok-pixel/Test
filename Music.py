@@ -5,6 +5,7 @@ __version__ = (1, 0, 4)
 
 import io
 import logging
+import asyncio
 from typing import Optional
 
 from ShazamAPI import Shazam
@@ -135,7 +136,7 @@ class MusicRecognizerMod(loader.Module):
             shazam = Shazam(audio_data.read())
             recognize_generator = shazam.recognizeSong()
             
-            for _ in range(5):  # Пробуем несколько раз
+            for _ in range(5):
                 try:
                     result = next(recognize_generator)
                     if result[1].get('track'):
@@ -168,27 +169,18 @@ class MusicRecognizerMod(loader.Module):
         if title and artist:
             search_query = f"{artist} {title}".replace(' ', '+')
             
-            # Яндекс Музыка
             yandex_url = f"https://music.yandex.ru/search?text={search_query}"
             links.append(f"🎵 <a href='{yandex_url}'>Яндекс Музыка</a>")
             
-            # YouTube
             youtube_url = f"https://www.youtube.com/results?search_query={search_query}"
             links.append(f"📺 <a href='{youtube_url}'>YouTube</a>")
             
-            # Spotify
             spotify_url = f"https://open.spotify.com/search/{search_query}"
             links.append(f"🎧 <a href='{spotify_url}'>Spotify</a>")
             
-            # SoundCloud
             soundcloud_url = f"https://soundcloud.com/search?q={search_query}"
             links.append(f"☁️ <a href='{soundcloud_url}'>SoundCloud</a>")
-            
-            # Apple Music (на всякий случай)
-            apple_url = f"https://music.apple.com/search?term={search_query}"
-            links.append(f"🍎 <a href='{apple_url}'>Apple Music</a>")
         
-        # Прямые ссылки из Shazam
         share_data = track.get('share', {})
         if share_data.get('href'):
             links.append(f"🔍 <a href='{share_data['href']}'>Shazam</a>")
@@ -232,7 +224,6 @@ class MusicRecognizerMod(loader.Module):
         result = await self.recognize_shazam(audio_data)
         
         if result:
-            # Отправляем обложку если есть
             images = result.get('images', {})
             if images.get('background'):
                 await self.client.send_file(
