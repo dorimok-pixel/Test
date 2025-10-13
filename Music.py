@@ -1,7 +1,7 @@
 # meta developer: @mofkomodules
 # name: MusicS
 
-__version__ = (1, 0, 7)
+__version__ = (1, 0, 3)
 
 import io
 import logging
@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 class MusicSMod(loader.Module):
     strings = {
         "name": "MusicS",
-        "processing": "🎵 Обрабатываю видео...",
-        "no_video": "❌ Ответьте на видео сообщение",
-        "recognition_failed": "❌ Не удалось распознать музыку",
-        "recognition_success": "🎶 <b>Найдено:</b>\n\n<code>{title}</code>\n<code>{artist}</code>\n\n🔗 <b>Ссылки:</b>\n{links}",
-        "downloading": "📥 Скачиваю видео...",
-        "file_too_large": "❌ Файл слишком большой (макс. {max_size} МБ)",
-        "wait_cooldown": "⏳ Подождите {} секунд",
-        "extracting": "🔧 Извлекаю аудио..."
+        "processing": "<emoji document_id=5463107823946717464>🎵</emoji> Обрабатываю видео...",
+        "no_video": "<emoji document_id=5210952531676504517>❌</emoji> Ответьте на видео сообщение",
+        "recognition_failed": "<emoji document_id=5210952531676504517>❌</emoji> Не удалось распознать музыку",
+        "recognition_success": "<emoji document_id=5463107823946717464>🎵</emoji> <b>Найдено:</b>\n\n<code>{title}</code>\n\n<emoji document_id=5271604874419647061>🔗</emoji> <b>Ссылки:</b>\n{links}",
+        "downloading": "<emoji document_id=5195377464137753198>🤔</emoji> Скачиваю видео...",
+        "file_too_large": "<emoji document_id=5210952531676504517>❌</emoji> Файл слишком большой (макс. {max_size} МБ)",
+        "wait_cooldown": "<emoji document_id=5458770564107743497>⏳</emoji> Подождите {} секунд",
+        "extracting": "<emoji document_id=5465287090352693530>🎶</emoji> Извлекаю аудио..."
     }
 
     def __init__(self):
@@ -173,19 +173,19 @@ class MusicSMod(loader.Module):
             search_query = f"{artist} {title}".replace(' ', '%20')
             
             youtube_url = f"https://www.youtube.com/results?search_query={search_query}"
-            links.append(f"📺 <a href='{youtube_url}'>YouTube</a>")
+            links.append(f"<emoji document_id=5193189878380116505>🧩</emoji> <a href='{youtube_url}'>YouTube</a>")
             
             soundcloud_url = f"https://soundcloud.com/search?q={search_query}"
-            links.append(f"☁️ <a href='{soundcloud_url}'>SoundCloud</a>")
+            links.append(f"<emoji document_id=5287571024500498635>☁️</emoji> <a href='{soundcloud_url}'>SoundCloud</a>")
             
             yandex_url = f"https://music.yandex.ru/search?text={search_query}"
-            links.append(f"🎵 <a href='{yandex_url}'>Яндекс Музыка</a>")
+            links.append(f"<emoji document_id=5172447776205702031>🎵</emoji> <a href='{yandex_url}'>Яндекс Музыка</a>")
         
         share_data = track.get('share', {})
         if share_data.get('href'):
-            links.append(f"🔍 <a href='{share_data['href']}'>Shazam</a>")
+            links.append(f"<emoji document_id=5188217332748527444>🔍</emoji> <a href='{share_data['href']}'>Shazam</a>")
         
-        return '\n'.join(links) if links else "Ссылки не найдены"
+        return '\n'.join([f"<blockquote>{link}</blockquote>" for link in links]) if links else "Ссылки не найдены"
 
     @loader.command()
     async def song(self, message: Message):
@@ -223,14 +223,15 @@ class MusicSMod(loader.Module):
         result = await self.recognize_shazam(audio_data)
         
         if result:
+            title_with_artist = f"{result['artist']} - {result['title']}"
+            
             images = result.get('images', {})
             if images.get('background'):
                 await self.client.send_file(
                     message.chat_id,
                     file=images['background'],
                     caption=self.strings["recognition_success"].format(
-                        title=result['title'],
-                        artist=result['artist'],
+                        title=title_with_artist,
                         links=result['links']
                     ),
                     reply_to=reply.id
@@ -238,8 +239,7 @@ class MusicSMod(loader.Module):
                 await status_msg.delete()
             else:
                 response = self.strings["recognition_success"].format(
-                    title=result['title'],
-                    artist=result['artist'], 
+                    title=title_with_artist,
                     links=result['links']
                 )
                 await utils.answer(status_msg, response)
