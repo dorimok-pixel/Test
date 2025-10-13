@@ -1,7 +1,7 @@
 # meta developer: @mofkomodules
 # name: MusicS
 
-__version__ = (1, 0, 3)
+__version__ = (1, 1, 0)
 
 import io
 import logging
@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class MusicSMod(loader.Module):
+    """Ищет треки из видео сообщения. (Находит не все треки)."""
+    
     strings = {
         "name": "MusicS",
         "processing": "<emoji document_id=5463107823946717464>🎵</emoji> Обрабатываю видео...",
@@ -31,12 +33,6 @@ class MusicSMod(loader.Module):
     def __init__(self):
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
-                "cooldown",
-                15,
-                "Задержка между запросами",
-                validator=loader.validators.Integer(minimum=10, maximum=60),
-            ),
-            loader.ConfigValue(
                 "max_file_size",
                 50,
                 "Максимальный размер файла",
@@ -44,6 +40,7 @@ class MusicSMod(loader.Module):
             ),
         )
         self.last_request = 0
+        self.cooldown = 4
 
     async def client_ready(self, client, db):
         self.client = client
@@ -67,7 +64,7 @@ class MusicSMod(loader.Module):
 
     async def check_cooldown(self) -> bool:
         current_time = asyncio.get_event_loop().time()
-        if current_time - self.last_request < self.config["cooldown"]:
+        if current_time - self.last_request < self.cooldown:
             return False
         self.last_request = current_time
         return True
@@ -189,6 +186,7 @@ class MusicSMod(loader.Module):
 
     @loader.command()
     async def song(self, message: Message):
+        """Найти трек из видео"""
         reply = await message.get_reply_message()
         
         if not reply:
@@ -196,7 +194,7 @@ class MusicSMod(loader.Module):
             return
 
         if not await self.check_cooldown():
-            wait_time = self.config["cooldown"] - int(asyncio.get_event_loop().time() - self.last_request)
+            wait_time = self.cooldown - int(asyncio.get_event_loop().time() - self.last_request)
             await utils.answer(message, self.strings["wait_cooldown"].format(wait_time))
             return
 
