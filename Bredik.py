@@ -1,7 +1,7 @@
 # meta developer: @mofkomodules 
 # name: Бредик
 
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 
 from herokutl.types import Message
 from .. import loader, utils
@@ -14,8 +14,6 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class BredMod(loader.Module):
-    """Отправляет рандомный бред от упоротой нейросети."""
-    
     strings = {"name": "Бредик"}
 
     def __init__(self):
@@ -23,7 +21,7 @@ class BredMod(loader.Module):
         self._cache_time: float = 0
         self.source_channel = "https://t.me/neuralmachine"
         self.cache_ttl = 3600
-        self.messages_limit = 5000
+        self.messages_limit = 3000
 
     async def client_ready(self, client, db):
         self.client = client
@@ -42,13 +40,7 @@ class BredMod(loader.Module):
                 limit=self.messages_limit
             )
             
-            filtered_messages = [
-                msg for msg in messages 
-                if not msg.media and msg.text and msg.text.strip()
-            ]
-            
-            if not filtered_messages:
-                return []
+            filtered_messages = [msg for msg in messages if not msg.media]
             
             self._messages_cache = filtered_messages
             self._cache_time = current_time
@@ -59,10 +51,7 @@ class BredMod(loader.Module):
             logger.error(f"Error loading messages: {e}")
             return self._messages_cache or []
 
-    @loader.command(
-        ru_doc="отправить бред",
-        alias="бред"
-    ) 
+    @loader.command(alias="бред") 
     async def bred(self, message: Message):
         try:
             messages = await self._get_messages()
@@ -80,3 +69,4 @@ class BredMod(loader.Module):
                 
         except Exception as e:
             logger.error(f"Error sending bred: {e}")
+            await utils.answer(message, "<emoji document_id=5420323339723881652>⚠️</emoji> Ошибка при отправке")
