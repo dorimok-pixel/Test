@@ -1,4 +1,4 @@
-__version__ = (1, 0, 1)
+__version__ = (1, 0, 0)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -44,7 +44,7 @@ class AliasProMod(loader.Module):
             else:
                 value = ""
                 
-            command_list = [cmd.strip() for cmd in commands.split(",")]
+            command_list = [cmd.strip() for cmd in commands.split(",") if cmd.strip()]
             
             self.aliases[name] = {"commands": command_list, "value": value}
             self.save_aliases()
@@ -83,10 +83,12 @@ class AliasProMod(loader.Module):
                 await message.delete()
                 
                 for command in data["commands"]:
+                    clean_command = command.strip()
+                    
                     if data["value"]:
-                        full_command = f"{prefix}{command.strip()} {data['value']} {search_query}"
+                        full_command = f"{prefix}{clean_command} {data['value']} {search_query}"
                     else:
-                        full_command = f"{prefix}{command.strip()} {search_query}"
+                        full_command = f"{prefix}{clean_command} {search_query}"
                     
                     await self.client.send_message(
                         message.peer_id,
