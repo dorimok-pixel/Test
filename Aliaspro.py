@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 2)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -83,7 +83,7 @@ class AliasProMod(loader.Module):
                 search_query = text[len(prefix + alias):].strip()
                 await message.delete()
                 
-                for i, command in enumerate(data["commands"]):
+                for command in data["commands"]:
                     clean_command = command.strip()
                     
                     if data["value"]:
@@ -91,13 +91,11 @@ class AliasProMod(loader.Module):
                     else:
                         full_command = f"{prefix}{clean_command} {search_query}"
                     
-                    await self.client.send_message(
+                    new_message = await self.client.send_message(
                         message.peer_id,
                         full_command
                     )
                     
-                    # Задержка между командами
-                    if i < len(data["commands"]) - 1:
-                        await asyncio.sleep(0.3)
+                    await asyncio.sleep(1)
                 
                 break
