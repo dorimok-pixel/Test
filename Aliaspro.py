@@ -1,6 +1,12 @@
-__version__ = (1, 0, 1)
+__version__ = (1, 0, 0)
+
 # meta developer: @mofkomodules 
 # name: AliasPro
+
+# Модуль для создания алиаса сразу для нескольких команд. 
+# Применение:
+# .addaliasfor поиск limoka, fheta, hetsu
+# .поиск ChatModule - Найдёт ChatModule по трём поисковым командам. 
 
 from herokutl.types import Message
 from .. import loader, utils
@@ -26,12 +32,12 @@ class AliasProMod(loader.Module):
         self._db.set("AliasPro", "aliases", self.aliases)
 
     @loader.command(
-        ru_doc="<название> <команды через запятую> [значение] - Добавить алиас для команд"
+        ru_doc="<название> <команды через запятую> [значение] - Добавить алиас для команд."
     )
     async def addaliasfor(self, message: Message):
         args = utils.get_args_raw(message)
         if not args:
-            return
+            return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, делай так: <название> <команды через запятую> [значение]")
         
         try:
             parts = args.split(" ", 2)
@@ -48,8 +54,10 @@ class AliasProMod(loader.Module):
             self.aliases[name] = {"commands": command_list, "value": value}
             self.save_aliases()
             
+            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас '{name}' готов!")
+            
         except (ValueError, IndexError):
-            return
+            await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
     @loader.command(
         ru_doc="<название> - Удалить алиас"
@@ -57,17 +65,17 @@ class AliasProMod(loader.Module):
     async def dalias(self, message: Message):
         args = utils.get_args_raw(message)
         if not args:
-            return
+            return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Укажите название алиаса")
         
         if args in self.aliases:
             del self.aliases[args]
             self.save_aliases()
+            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас '{args}' убран")
+        else:
+            await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
-    @loader.watcher(out=True)
+    @loader.watcher(only_commands=True, only_out=True)
     async def watcher(self, message: Message):
-        if not message.text or not message.out:
-            return
-        
         text = message.text
         prefix = self.get_prefix()
         
@@ -81,8 +89,9 @@ class AliasProMod(loader.Module):
                         full_command = f"{prefix}{command.strip()} {data['value']} {search_query}"
                     else:
                         full_command = f"{prefix}{command.strip()} {search_query}"
+                    
                     await self.client.send_message(
                         message.peer_id,
                         full_command
                     )
-                break 
+                break
