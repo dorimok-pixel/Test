@@ -1,10 +1,11 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
 
 from herokutl.types import Message
 from .. import loader, utils
+import asyncio
 
 @loader.tds
 class AliasProMod(loader.Module):
@@ -82,7 +83,7 @@ class AliasProMod(loader.Module):
                 search_query = text[len(prefix + alias):].strip()
                 await message.delete()
                 
-                for command in data["commands"]:
+                for i, command in enumerate(data["commands"]):
                     clean_command = command.strip()
                     
                     if data["value"]:
@@ -94,4 +95,8 @@ class AliasProMod(loader.Module):
                         message.peer_id,
                         full_command
                     )
+                    
+                    if i < len(data["commands"]) - 1:
+                        await asyncio.sleep(0.5)
+                
                 break
