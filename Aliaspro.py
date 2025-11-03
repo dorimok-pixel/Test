@@ -1,4 +1,4 @@
-__version__ = (1, 0, 1)
+__version__ = (1, 0, 0)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -96,7 +96,8 @@ class AliasProMod(loader.Module):
                         full_command
                     )
                     
+                    # Задержка между командами
                     if i < len(data["commands"]) - 1:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.3)
                 
                 break
