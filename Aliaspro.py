@@ -1,12 +1,7 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
-
-# Модуль для создания алиаса сразу для нескольких команд. 
-# Применение:
-# .addaliasfor поиск limoka, fheta, hetsu
-# .поиск ChatModule - Найдёт ChatModule по трём поисковым командам. 
 
 from herokutl.types import Message
 from .. import loader, utils
@@ -54,7 +49,7 @@ class AliasProMod(loader.Module):
             self.aliases[name] = {"commands": command_list, "value": value}
             self.save_aliases()
             
-            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас '{name}' готов!")
+            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас <code>{name}</code> готов!")
             
         except (ValueError, IndexError):
             await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
@@ -70,12 +65,15 @@ class AliasProMod(loader.Module):
         if args in self.aliases:
             del self.aliases[args]
             self.save_aliases()
-            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас '{args}' убран")
+            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас <code>{args}</code> убран")
         else:
             await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
-    @loader.watcher(only_commands=True, only_out=True)
+    @loader.watcher()
     async def watcher(self, message: Message):
+        if not message.out or not message.text:
+            return
+            
         text = message.text
         prefix = self.get_prefix()
         
