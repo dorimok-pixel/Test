@@ -1,4 +1,4 @@
-__version__ = (1, 0, 4)
+__version__ = (1, 0, 5)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -101,30 +101,30 @@ class AliasProMod(loader.Module):
             if text.startswith(prefix + alias):
                 search_query = text[len(prefix + alias):].strip()
                 
-                # Удаляем только оригинальное сообщение с алиасом
+                # Удаляем оригинальное сообщение с алиасом
                 await message.delete()
                 
-                # Отправляем каждую команду как отдельное сообщение
-                for i, command in enumerate(data["commands"]):
+                # Отправляем КАЖДУЮ команду как ОТДЕЛЬНОЕ сообщение
+                for command in data["commands"]:
                     clean_command = command.strip()
                     
-                    # Формируем полную команду с префиксом
+                    # Формируем команду для каждой отдельно
                     if data["value"]:
+                        # Если есть фиксированное значение, добавляем его
                         full_command = f"{prefix}{clean_command} {data['value']} {search_query}"
                     else:
+                        # Если нет фиксированного значения, только поисковый запрос
                         full_command = f"{prefix}{clean_command} {search_query}"
                     
-                    # Отправляем команду как новое сообщение (НЕ удаляем его!)
+                    # Отправляем каждую команду как отдельное сообщение
                     try:
                         await self.client.send_message(
                             message.peer_id,
                             full_command.strip()
                         )
+                        # Небольшая задержка между отправкой сообщений
+                        await asyncio.sleep(0.5)
                     except Exception as e:
                         logger.error(f"Ошибка отправки команды {clean_command}: {e}")
-                    
-                    # Задержка между командами для избежания FloodWait
-                    if i < len(data["commands"]) - 1:
-                        await asyncio.sleep(1)
                 
                 break
