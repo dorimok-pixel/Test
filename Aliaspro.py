@@ -1,4 +1,4 @@
-__version__ = (1, 0, 5)
+__version__ = (1, 0, 1)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -6,16 +6,13 @@ __version__ = (1, 0, 5)
 from herokutl.types import Message
 from .. import loader, utils
 import asyncio
-import logging
-
-logger = logging.getLogger(__name__)
 
 @loader.tds
 class AliasProMod(loader.Module):
     """Модуль для создания алиаса сразу для нескольких команд. 
 Применение:
 .addaliasfor поиск limoka, fheta, hetsu
-.поиск ChatModule - Отправит .limoka ChatModule, .fheta ChatModule, .hetsu ChatModule"""
+.поиск ChatModule - Найдёт ChatModule по трём поисковым командам."""
     
     strings = {"name": "AliasPro"}
 
@@ -39,23 +36,30 @@ class AliasProMod(loader.Module):
             return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, делай так: <название> <команды через запятую> [значение]")
         
         try:
-            parts = args.split(" ", 2)
+            # Разделяем на название и остальное
+            parts = args.split(" ", 1)
+            if len(parts) < 2:
+                await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Мало аргументов")
+                return
+                
             name = parts[0]
-            commands = parts[1]
+            rest = parts[1]
             
-            if len(parts) == 3:
-                value = parts[2]
+            # Разделяем команды и значение
+            if " " in rest:
+                commands_part, value = rest.split(" ", 1)
             else:
+                commands_part = rest
                 value = ""
                 
-            command_list = [cmd.strip() for cmd in commands.split(",") if cmd.strip()]
+            command_list = [cmd.strip() for cmd in commands_part.split(",") if cmd.strip()]
             
-            self.aliases[name] = {"commands": command_list, "value": value}
+            self.aliases[name] = {"commands": command_list, "value": value.strip()}
             self.save_aliases()
             
             await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас <code>{name}</code> готов!")
             
-        except (ValueError, IndexError):
+        except Exception:
             await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
     @loader.command(
@@ -73,22 +77,6 @@ class AliasProMod(loader.Module):
         else:
             await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
-    @loader.command(
-        ru_doc="Показать все алиасы"
-    )
-    async def listalias(self, message: Message):
-        if not self.aliases:
-            await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Нет алиасов")
-            return
-            
-        text = "<emoji document_id=6012543830274873468>☺️</emoji> <b>Алиасы:</b>\n\n"
-        for alias, data in self.aliases.items():
-            commands = ", ".join(data["commands"])
-            value = f" | {data['value']}" if data["value"] else ""
-            text += f"• <code>{alias}</code> → {commands}{value}\n"
-            
-        await utils.answer(message, text)
-
     @loader.watcher()
     async def watcher(self, message: Message):
         if not message.out or not message.text:
@@ -98,33 +86,31 @@ class AliasProMod(loader.Module):
         prefix = self.get_prefix()
         
         for alias, data in self.aliases.items():
-            if text.startswith(prefix + alias):
-                search_query = text[len(prefix + alias):].strip()
+            alias_with_prefix = prefix + alias
+            
+            if text.startswith(alias_with_prefix):
+                search_query = text[len(alias_with_prefix):].strip()
                 
-                # Удаляем оригинальное сообщение с алиасом
+                # Удаляем оригинальное сообщение
                 await message.delete()
                 
-                # Отправляем КАЖДУЮ команду как ОТДЕЛЬНОЕ сообщение
+                # Отправляем КАЖДУЮ команду ОТДЕЛЬНЫМ сообщением
                 for command in data["commands"]:
                     clean_command = command.strip()
                     
-                    # Формируем команду для каждой отдельно
+                    # Формируем команду для КАЖДОЙ отдельно
                     if data["value"]:
-                        # Если есть фиксированное значение, добавляем его
                         full_command = f"{prefix}{clean_command} {data['value']} {search_query}"
                     else:
-                        # Если нет фиксированного значения, только поисковый запрос
                         full_command = f"{prefix}{clean_command} {search_query}"
                     
-                    # Отправляем каждую команду как отдельное сообщение
-                    try:
-                        await self.client.send_message(
-                            message.peer_id,
-                            full_command.strip()
-                        )
-                        # Небольшая задержка между отправкой сообщений
-                        await asyncio.sleep(0.5)
-                    except Exception as e:
-                        logger.error(f"Ошибка отправки команды {clean_command}: {e}")
+                    # Отправляем отдельное сообщение для каждой команды
+                    await self.client.send_message(
+                        message.peer_id,
+                        full_command.strip()
+                    )
+                    
+                    # Небольшая задержка между сообщениями
+                    await asyncio.sleep(0.3)
                 
                 break
