@@ -1,4 +1,4 @@
-__version__ = (1, 0, 3)
+__version__ = (1, 0, 0)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -102,10 +102,17 @@ class AliasProMod(loader.Module):
                     else:
                         full_command = f"{prefix}{command} {search_query}"
                     
-                    await self.client.send_message(
+                    # Отправляем команду
+                    sent_message = await self.client.send_message(
                         message.peer_id,
                         full_command.strip()
                     )
+                    
+                    # Ждем пока команда выполнится
+                    await asyncio.sleep(3)
+                    
+                    # Удаляем отправленную команду после выполнения
+                    await sent_message.delete()
                     
                     # Задержка между командами (кроме последней)
                     if i < len(data["commands"]) - 1:
