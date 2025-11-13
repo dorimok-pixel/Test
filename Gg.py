@@ -1,4 +1,4 @@
-__version__ = (1, 0, 5)
+__version__ = (1, 0, 0)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -9,6 +9,11 @@ import asyncio
 
 @loader.tds
 class AliasProMod(loader.Module):
+    """Модуль для создания алиаса сразу для нескольких команд. 
+Применение:
+.addaliasfor поиск limoka, fheta, hetsu
+.поиск ChatModule - Найдёт ChatModule по трём поисковым командам."""
+    
     strings = {"name": "AliasPro"}
 
     def __init__(self):
@@ -38,21 +43,23 @@ class AliasProMod(loader.Module):
             if not rest:
                 return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, делай так: <название> <команды через запятую> [значение]")
             
-            last_comma = rest.rfind(",")
-            if last_comma == -1:
-                return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Команды должны быть через запятую")
-            
-            commands_part = rest[:last_comma + 1].strip()
-            value_part = rest[last_comma + 1:].strip()
-            
-            command_list = [cmd.strip() for cmd in commands_part.split(",") if cmd.strip()]
-            
-            if value_part:
-                first_word = value_part.split(" ", 1)[0]
-                command_list.append(first_word)
-                value = value_part[len(first_word):].strip() if len(value_part) > len(first_word) else ""
+            if "," in rest:
+                last_comma = rest.rfind(",")
+                commands_part = rest[:last_comma + 1].strip()
+                value_part = rest[last_comma + 1:].strip()
+                
+                command_list = [cmd.strip() for cmd in commands_part.split(",") if cmd.strip()]
+                
+                if value_part:
+                    first_word = value_part.split(" ", 1)[0]
+                    command_list.append(first_word)
+                    value = value_part[len(first_word):].strip() if len(value_part) > len(first_word) else ""
+                else:
+                    value = ""
             else:
-                value = ""
+                command_parts = rest.split(" ", 1)
+                command_list = [command_parts[0].strip()]
+                value = command_parts[1] if len(command_parts) > 1 else ""
             
             self.aliases[name] = {
                 "commands": command_list, 
