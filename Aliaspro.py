@@ -1,4 +1,4 @@
-__version__ = (1, 0, 3)
+__version__ = (1, 0, 0)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -9,7 +9,10 @@ import asyncio
 
 @loader.tds
 class AliasProMod(loader.Module):
-    """Модуль для создания алиаса сразу для нескольких команд."""
+    """Модуль для создания алиаса сразу для нескольких команд. 
+Применение:
+.addaliasfor поиск limoka, fheta, hetsu
+.поиск ChatModule - Найдёт ChatModule по трём поисковым командам."""
     
     strings = {"name": "AliasPro"}
 
@@ -24,26 +27,27 @@ class AliasProMod(loader.Module):
     def save_aliases(self):
         self._db.set("AliasPro", "aliases", self.aliases)
 
-    @loader.command()
+    @loader.command(
+        ru_doc="<название> <команды через запятую> [значение] - Добавить алиас для команд."
+    )
     async def addaliasfor(self, message: Message):
-        """<название> <команды через запятую> [значение] - Добавить алиас"""
         args = utils.get_args_raw(message)
         if not args:
-            return await utils.answer(message, "❌ Формат: .addaliasfor название команда1,команда2,команда3 [значение]")
+            return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, делай так: <название> <команды через запятую> [значение]")
         
         try:
             # Разделяем название и остальное
             parts = args.split(" ", 1)
-            if len(parts) < 2:
-                return await utils.answer(message, "❌ Недостаточно аргументов")
-                
             name = parts[0].strip()
-            rest = parts[1].strip()
+            rest = parts[1].strip() if len(parts) > 1 else ""
+            
+            if not rest:
+                return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, делай так: <название> <команды через запятую> [значение]")
             
             # Находим где заканчиваются команды (последняя запятая)
             last_comma = rest.rfind(",")
             if last_comma == -1:
-                return await utils.answer(message, "❌ Команды должны быть через запятую")
+                return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Команды должны быть через запятую")
             
             # Команды - всё до последней запятой + следующее слово
             commands_part = rest[:last_comma + 1].strip()
@@ -62,85 +66,31 @@ class AliasProMod(loader.Module):
             else:
                 value = ""
             
-            await utils.answer(message, f"🔍 Отладка:\nНазвание: {name}\nКоманды: {command_list}\nЗначение: '{value}'")
-            
             self.aliases[name] = {
                 "commands": command_list, 
                 "value": value
             }
             self.save_aliases()
             
-        except Exception as e:
-            await utils.answer(message, f"❌ Ошибка: {e}")
+            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас <code>{name}</code> готов!")
+            
+        except Exception:
+            await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
-    @loader.command()
-    async def addaliasfor2(self, message: Message):
-        """АЛЬТЕРНАТИВНЫЙ СПОСОБ: .addaliasfor2 название команда1 команда2 команда3 :: значение"""
-        args = utils.get_args_raw(message)
-        if not args:
-            return await utils.answer(message, "❌ Формат: .addaliasfor2 название команда1 команда2 команда3 :: значение")
-        
-        try:
-            # Разделяем по ::
-            if "::" not in args:
-                return await utils.answer(message, "❌ Используйте :: для разделения команд и значения")
-            
-            commands_part, value = args.split("::", 1)
-            commands_part = commands_part.strip()
-            value = value.strip()
-            
-            # Разделяем название и команды
-            parts = commands_part.split(" ", 1)
-            if len(parts) < 2:
-                return await utils.answer(message, "❌ Недостаточно аргументов")
-                
-            name = parts[0].strip()
-            commands_str = parts[1].strip()
-            
-            # Команды разделены пробелами
-            command_list = [cmd.strip() for cmd in commands_str.split() if cmd.strip()]
-            
-            await utils.answer(message, f"✅ Алиас создан:\nНазвание: {name}\nКоманды: {command_list}\nЗначение: '{value}'")
-            
-            self.aliases[name] = {
-                "commands": command_list, 
-                "value": value
-            }
-            self.save_aliases()
-            
-        except Exception as e:
-            await utils.answer(message, f"❌ Ошибка: {e}")
-
-    @loader.command()
+    @loader.command(
+        ru_doc="<название> - Удалить алиас"
+    )
     async def dalias(self, message: Message):
-        """<название> - Удалить алиас"""
         args = utils.get_args_raw(message)
         if not args:
-            return await utils.answer(message, "❌ Укажите название алиаса")
+            return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Укажите название алиаса")
         
         if args in self.aliases:
             del self.aliases[args]
             self.save_aliases()
-            await utils.answer(message, f"✅ Алиас <code>{args}</code> удален")
+            await utils.answer(message, f"<emoji document_id=6012543830274873468>☺️</emoji> Алиас <code>{args}</code> убран")
         else:
-            await utils.answer(message, "❌ Алиас не найден")
-
-    @loader.command()
-    async def debugalias(self, message: Message):
-        """Показать отладочную информацию об алиасах"""
-        if not self.aliases:
-            await utils.answer(message, "📝 Нет алиасов")
-            return
-            
-        text = "🔍 <b>Отладочная информация:</b>\n\n"
-        for alias, data in self.aliases.items():
-            commands = data["commands"]
-            value = data["value"]
-            text += f"• <code>{alias}</code>\n"
-            text += f"  Команды ({len(commands)}): {commands}\n"
-            text += f"  Значение: '{value}'\n\n"
-            
-        await utils.answer(message, text)
+            await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
     @loader.watcher()
     async def watcher(self, message: Message):
