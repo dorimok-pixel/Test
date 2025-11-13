@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 3)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -94,22 +94,21 @@ class AliasProMod(loader.Module):
             if text.startswith(alias_with_prefix):
                 search_query = text[len(alias_with_prefix):].strip()
                 
-                # Удаляем только сообщение с алиасом
                 await message.delete()
                 
-                # Отправляем команды как отдельные сообщения (они НЕ удаляются)
-                for command in data["commands"]:
+                for i, command in enumerate(data["commands"]):
                     if data["value"]:
                         full_command = f"{prefix}{command} {data['value']} {search_query}"
                     else:
                         full_command = f"{prefix}{command} {search_query}"
                     
-                    # Отправляем команду - она остается в чате
                     await self.client.send_message(
                         message.peer_id,
                         full_command.strip()
                     )
                     
-                    await asyncio.sleep(1)
+                    # Задержка между командами (кроме последней)
+                    if i < len(data["commands"]) - 1:
+                        await asyncio.sleep(2)
                 
                 break
