@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -70,6 +70,22 @@ class AliasProMod(loader.Module):
         else:
             await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Хрень сморозил")
 
+    @loader.command(
+        ru_doc="Показать все алиасы"
+    )
+    async def listalias(self, message: Message):
+        if not self.aliases:
+            await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Нет алиасов")
+            return
+            
+        text = "<emoji document_id=6012543830274873468>☺️</emoji> <b>Алиасы:</b>\n\n"
+        for alias, data in self.aliases.items():
+            commands = ", ".join(data["commands"])
+            value = f" | {data['value']}" if data["value"] else ""
+            text += f"• <code>{alias}</code> → {commands}{value}\n"
+            
+        await utils.answer(message, text)
+
     @loader.watcher()
     async def watcher(self, message: Message):
         if not message.out or not message.text:
@@ -82,32 +98,28 @@ class AliasProMod(loader.Module):
             if text.startswith(prefix + alias):
                 search_query = text[len(prefix + alias):].strip()
                 
-                # Сначала удаляем оригинальное сообщение
+                # Удаляем оригинальное сообщение
                 await message.delete()
                 
-                # Затем отправляем все команды по очереди
+                # Выполняем команды через внутреннюю систему
                 for i, command in enumerate(data["commands"]):
                     clean_command = command.strip()
                     
+                    # Формируем полную команду
                     if data["value"]:
-                        full_command = f"{prefix}{clean_command} {data['value']} {search_query}"
+                        full_command = f"{clean_command} {data['value']} {search_query}"
                     else:
-                        full_command = f"{prefix}{clean_command} {search_query}"
+                        full_command = f"{clean_command} {search_query}"
                     
-                    # Создаем новое сообщение с командой
-                    new_message = await self.client.send_message(
-                        message.peer_id,
-                        full_command
-                    )
+                    # Выполняем команду через внутренний invoke
+                    try:
+                        await self.invoke(full_command, message.peer_id)
+                    except Exception as e:
+                        # Логируем ошибку, но продолжаем выполнение других команд
+                        logger.error(f"Ошибка выполнения команды {clean_command}: {e}")
                     
-                    # Ждем пока команда обработается
-                    await asyncio.sleep(1)
-                    
-                    # Удаляем сообщение с командой после выполнения
-                    await new_message.delete()
-                    
-                    # Задержка между командами (кроме последней)
+                    # Задержка между командами для избежания FloodWait
                     if i < len(data["commands"]) - 1:
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(1)
                 
                 break
