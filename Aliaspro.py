@@ -1,4 +1,4 @@
-__version__ = (1, 0, 3)
+__version__ = (1, 0, 4)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -101,10 +101,10 @@ class AliasProMod(loader.Module):
             if text.startswith(prefix + alias):
                 search_query = text[len(prefix + alias):].strip()
                 
-                # Удаляем оригинальное сообщение
+                # Удаляем только оригинальное сообщение с алиасом
                 await message.delete()
                 
-                # Отправляем команды как сообщения с префиксом
+                # Отправляем каждую команду как отдельное сообщение
                 for i, command in enumerate(data["commands"]):
                     clean_command = command.strip()
                     
@@ -114,19 +114,12 @@ class AliasProMod(loader.Module):
                     else:
                         full_command = f"{prefix}{clean_command} {search_query}"
                     
-                    # Отправляем команду как сообщение
+                    # Отправляем команду как новое сообщение (НЕ удаляем его!)
                     try:
-                        sent_message = await self.client.send_message(
+                        await self.client.send_message(
                             message.peer_id,
                             full_command.strip()
                         )
-                        
-                        # Ждем немного перед удалением (если нужно)
-                        await asyncio.sleep(0.5)
-                        
-                        # Удаляем отправленную команду (опционально)
-                        await sent_message.delete()
-                        
                     except Exception as e:
                         logger.error(f"Ошибка отправки команды {clean_command}: {e}")
                     
