@@ -1,4 +1,4 @@
-__version__ = (1, 0, 1)
+__version__ = (1, 0, 3)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -6,13 +6,16 @@ __version__ = (1, 0, 1)
 from herokutl.types import Message
 from .. import loader, utils
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 @loader.tds
 class AliasProMod(loader.Module):
     """Модуль для создания алиаса сразу для нескольких команд. 
 Применение:
 .addaliasfor поиск limoka, fheta, hetsu
-.поиск ChatModule - Найдёт ChatModule по трём поисковым командам."""
+.поиск ChatModule - Отправит .limoka ChatModule, .fheta ChatModule, .hetsu ChatModule"""
     
     strings = {"name": "AliasPro"}
 
@@ -101,22 +104,31 @@ class AliasProMod(loader.Module):
                 # Удаляем оригинальное сообщение
                 await message.delete()
                 
-                # Выполняем команды через внутреннюю систему
+                # Отправляем команды как сообщения с префиксом
                 for i, command in enumerate(data["commands"]):
                     clean_command = command.strip()
                     
-                    # Формируем полную команду
+                    # Формируем полную команду с префиксом
                     if data["value"]:
-                        full_command = f"{clean_command} {data['value']} {search_query}"
+                        full_command = f"{prefix}{clean_command} {data['value']} {search_query}"
                     else:
-                        full_command = f"{clean_command} {search_query}"
+                        full_command = f"{prefix}{clean_command} {search_query}"
                     
-                    # Выполняем команду через внутренний invoke
+                    # Отправляем команду как сообщение
                     try:
-                        await self.invoke(full_command, message.peer_id)
+                        sent_message = await self.client.send_message(
+                            message.peer_id,
+                            full_command.strip()
+                        )
+                        
+                        # Ждем немного перед удалением (если нужно)
+                        await asyncio.sleep(0.5)
+                        
+                        # Удаляем отправленную команду (опционально)
+                        await sent_message.delete()
+                        
                     except Exception as e:
-                        # Логируем ошибку, но продолжаем выполнение других команд
-                        logger.error(f"Ошибка выполнения команды {clean_command}: {e}")
+                        logger.error(f"Ошибка отправки команды {clean_command}: {e}")
                     
                     # Задержка между командами для избежания FloodWait
                     if i < len(data["commands"]) - 1:
