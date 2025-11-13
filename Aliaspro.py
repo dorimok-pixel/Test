@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 0, 1)
 
 # meta developer: @mofkomodules 
 # name: AliasPro
@@ -9,11 +9,6 @@ import asyncio
 
 @loader.tds
 class AliasProMod(loader.Module):
-    """Модуль для создания алиаса сразу для нескольких команд. 
-Применение:
-.addaliasfor поиск limoka, fheta, hetsu
-.поиск ChatModule - Найдёт ChatModule по трём поисковым командам."""
-    
     strings = {"name": "AliasPro"}
 
     def __init__(self):
@@ -36,7 +31,6 @@ class AliasProMod(loader.Module):
             return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, делай так: <название> <команды через запятую> [значение]")
         
         try:
-            # Разделяем название и остальное
             parts = args.split(" ", 1)
             name = parts[0].strip()
             rest = parts[1].strip() if len(parts) > 1 else ""
@@ -44,24 +38,18 @@ class AliasProMod(loader.Module):
             if not rest:
                 return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, делай так: <название> <команды через запятую> [значение]")
             
-            # Находим где заканчиваются команды (последняя запятая)
             last_comma = rest.rfind(",")
             if last_comma == -1:
                 return await utils.answer(message, "<emoji document_id=6012681561286122335>🤤</emoji> Команды должны быть через запятую")
             
-            # Команды - всё до последней запятой + следующее слово
             commands_part = rest[:last_comma + 1].strip()
-            # Значение - всё после последней запятой
             value_part = rest[last_comma + 1:].strip()
             
-            # Разделяем команды по запятой
             command_list = [cmd.strip() for cmd in commands_part.split(",") if cmd.strip()]
             
-            # Добавляем последнюю команду из value_part (первое слово)
             if value_part:
                 first_word = value_part.split(" ", 1)[0]
                 command_list.append(first_word)
-                # Оставшееся - это настоящее значение
                 value = value_part[len(first_word):].strip() if len(value_part) > len(first_word) else ""
             else:
                 value = ""
@@ -106,24 +94,19 @@ class AliasProMod(loader.Module):
             if text.startswith(alias_with_prefix):
                 search_query = text[len(alias_with_prefix):].strip()
                 
-                # Удаляем оригинальное сообщение
                 await message.delete()
                 
-                # Отправляем КАЖДУЮ команду отдельным сообщением
                 for command in data["commands"]:
-                    # Формируем команду
                     if data["value"]:
                         full_command = f"{prefix}{command} {data['value']} {search_query}"
                     else:
                         full_command = f"{prefix}{command} {search_query}"
                     
-                    # Отправляем отдельное сообщение
                     await self.client.send_message(
                         message.peer_id,
                         full_command.strip()
                     )
                     
-                    # Задержка
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(1)
                 
                 break
