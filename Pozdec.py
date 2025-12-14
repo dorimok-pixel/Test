@@ -73,7 +73,16 @@ class RegularMessagesMod(loader.Module):
         "input_message": "💬 Введите новый текст сообщения",
         "updated": "✅ Параметр обновлен",
         "canceled": "❌ Изменение отменено",
-        "timezone_hint": "Часовой пояс для регулярных сообщений",
+        "timezone_hint": "Часовой пояс (например: +5, -2, +0 относительно MSK/UTC+3). Используйте целые числа.",
+        "period_menu": "📅 <b>Выберите тип периода:</b>\n\nПримеры для каждого типа:",
+        "period_daily": "Ежедневно (д)",
+        "period_weekly": "Еженедельно (н)",
+        "period_monthly": "Ежемесячно (м)",
+        "period_interval": "Интервальный (2ч15м)",
+        "period_daily_example": "Пример: <code>д, 09:00, 01.01, Доброе утро!</code>",
+        "period_weekly_example": "Пример: <code>Суббота, 20:15, 27.12, Собрание</code>",
+        "period_monthly_example": "Пример: <code>м, 15:00, 01.01, Отчет за месяц</code>",
+        "period_interval_example": "Пример: <code>2ч15м, 27.12, Напоминание</code>",
     }
 
     strings_ru = strings
@@ -115,12 +124,24 @@ class RegularMessagesMod(loader.Module):
         self.client = client
         self.db = db
         
-        # Инициализация часового пояса
+        # Инициализация часового пояса с поддержкой смещения
+        timezone_str = self.config["timezone"]
         try:
-            self.timezone = pytz.timezone(self.config["timezone"])
-        except pytz.exceptions.UnknownTimeZoneError:
+            # Пробуем распарсить как смещение (+5, -2 и т.д.)
+            if re.match(r'^[+-]?\d+$', timezone_str):
+                offset_hours = int(timezone_str)
+                # MSK = UTC+3, поэтому корректируем
+                utc_offset = offset_hours - 3  # переводим из смещения от MSK в смещение от UTC
+                offset_minutes = utc_offset * 60
+                self.timezone = pytz.FixedOffset(offset_minutes)
+                logger.info(f"Используется часовой пояс: UTC{utc_offset:+d} (относительно MSK: {offset_hours:+d})")
+            else:
+                # Используем стандартный часовой пояс
+                self.timezone = pytz.timezone(timezone_str)
+                logger.info(f"Используется часовой пояс: {timezone_str}")
+        except (pytz.exceptions.UnknownTimeZoneError, ValueError) as e:
             self.timezone = pytz.timezone("Europe/Moscow")
-            logger.warning(f"Неизвестный часовой пояс {self.config['timezone']}, используется Europe/Moscow")
+            logger.warning(f"Неизвестный часовой пояс {timezone_str}, используется Europe/Moscow: {e}")
         
         self._load_messages()
         self.task = asyncio.create_task(self._check_messages_loop())
@@ -798,16 +819,16 @@ class RegularMessagesMod(loader.Module):
         buttons = [
             [
                 {"text": "🔄 Вкл/Выкл", "callback": self._toggle_message, "args": (msg_id,)},
-                {"text": "✏️ Изменить период", "input": self.strings["input_period"], "handler": self._input_period_handler, "args": (msg_id,)}
+                {"text": "✏️ Изменить период", "callback": self._show_period_menu, "args": (msg_id,)}
             ]
         ]
         
+        # Добавляем кнопку изменения времени только для неинтервальных периодов
         if period_type != "interval":
             buttons[0].append({"text": "⏰ Изменить время", "input": self.strings["input_time"], "handler": self._input_time_handler, "args": (msg_id,)})
         
         buttons.append([
-            {"text": "📆 Изменить дату", "input": self.strings["input_date"], "handler": self._input_date_handler, "args": (msg_id,)},
-            {"text": "💬 Изменить сообщение", "input": self.strings["input_message"], "handler": self._input_message_handler, "args": (msg_id,)}
+            {"text": "💬 Изменить сообщение", "input": self.strings["input_message"], "handler": self._input_message_handler, "args": (msg_id,)},
         ])
         
         buttons.append([
@@ -828,6 +849,34 @@ class RegularMessagesMod(loader.Module):
             status = "✅ Включено" if msg["enabled"] else "❌ Выключено"
             await call.answer(f"Статус изменен: {status}")
             await self._show_message_menu(call, msg_id)
+
+    async def _show_period_menu(self, call, msg_id):
+        """Меню выбора типа периода с примерами"""
+        text = (
+            f"{self.strings['period_menu']}\n\n"
+            f"1. <b>{self.strings['period_daily']}</b>\n"
+            f"   {self.strings['period_daily_example']}\n\n"
+            f"2. <b>{self.strings['period_weekly']}</b>\n"
+            f"   {self.strings['period_weekly_example']}\n\n"
+            f"3. <b>{self.strings['period_monthly']}</b>\n"
+            f"   {self.strings['period_monthly_example']}\n\n"
+            f"4. <b>{self.strings['period_interval']}</b>\n"
+            f"   {self.strings['period_interval_example']}"
+        )
+        
+        buttons = [
+            [
+                {"text": "1. Ежедневно", "input": "Введите период (например: д)", "handler": self._input_period_handler, "args": (msg_id,)},
+                {"text": "2. Еженедельно", "input": "Введите период (например: Суббота или н)", "handler": self._input_period_handler, "args": (msg_id,)}
+            ],
+            [
+                {"text": "3. Ежемесячно", "input": "Введите период (например: м или Январь)", "handler": self._input_period_handler, "args": (msg_id,)},
+                {"text": "4. Интервальный", "input": "Введите период (например: 2ч15м или 30м)", "handler": self._input_period_handler, "args": (msg_id,)}
+            ],
+            [{"text": "🔙 Назад", "callback": self._show_message_menu, "args": (msg_id,)}]
+        ]
+        
+        await call.edit(text, reply_markup=buttons)
 
     async def _input_period_handler(self, call: InlineCall, query: str, msg_id: int):
         """Обработчик ввода нового периода"""
@@ -876,27 +925,6 @@ class RegularMessagesMod(loader.Module):
             self._save_messages()
             
             await call.answer("✅ Время обновлено")
-            await self._show_message_menu(call, msg_id)
-            
-        except ValueError as e:
-            await call.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
-
-    async def _input_date_handler(self, call: InlineCall, query: str, msg_id: int):
-        """Обработчик ввода новой даты"""
-        if msg_id not in self.messages:
-            await call.answer("Сообщение не найдено")
-            return
-        
-        try:
-            date_tuple = self._parse_date(query)
-            msg = self.messages[msg_id]
-            msg["start_date"] = date_tuple
-            
-            # Пересчитываем следующее время отправки
-            msg["next_send"] = await self._calculate_next_send(msg)
-            self._save_messages()
-            
-            await call.answer("✅ Дата обновлена")
             await self._show_message_menu(call, msg_id)
             
         except ValueError as e:
@@ -962,4 +990,4 @@ class RegularMessagesMod(loader.Module):
                 logger.error(f"Ошибка пересчета сообщения {msg_id}: {e}")
         
         self._save_messages()
-        await utils.answer(message, f"🔄 Пересчитано {count} сообщений")
+        await utils.answer(message, f"🔄 Пересчитано {count} сообщений") 
