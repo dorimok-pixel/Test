@@ -1,6 +1,6 @@
 # meta developer: @mofkomodules
 # name: RegularM
-# requires: aiohttp
+# requires: aiohttp pytz
 
 import asyncio
 import re
@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import logging
+import pytz
 
 from .. import loader, utils
 from ..inline.types import InlineCall
@@ -72,6 +73,7 @@ class RegularMessagesMod(loader.Module):
         "input_message": "💬 Введите новый текст сообщения",
         "updated": "✅ Параметр обновлен",
         "canceled": "❌ Изменение отменено",
+        "timezone_hint": "Часовой пояс для регулярных сообщений",
     }
 
     strings_ru = strings
@@ -90,7 +92,16 @@ class RegularMessagesMod(loader.Module):
     }
 
     def __init__(self):
-        # Фиксированные настройки (без конфигурации)
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "timezone",
+                "Europe/Moscow",
+                lambda: self.strings["timezone_hint"],
+                validator=loader.validators.String(),
+            ),
+        )
+        
+        # Фиксированные настройки
         self.check_interval = 60  # секунд
         self.max_messages_per_minute = 5
         self.retry_delay = 300  # секунд
@@ -98,11 +109,19 @@ class RegularMessagesMod(loader.Module):
         self.messages: Dict[int, dict] = {}
         self.task: Optional[asyncio.Task] = None
         self.last_send_time = 0
-        self.editing_data = {}  # Для хранения данных во время редактирования
+        self.timezone = None
 
     async def client_ready(self, client, db):
         self.client = client
         self.db = db
+        
+        # Инициализация часового пояса
+        try:
+            self.timezone = pytz.timezone(self.config["timezone"])
+        except pytz.exceptions.UnknownTimeZoneError:
+            self.timezone = pytz.timezone("Europe/Moscow")
+            logger.warning(f"Неизвестный часовой пояс {self.config['timezone']}, используется Europe/Moscow")
+        
         self._load_messages()
         self.task = asyncio.create_task(self._check_messages_loop())
 
@@ -134,10 +153,9 @@ class RegularMessagesMod(loader.Module):
                 self._save_messages()
 
     def _parse_period(self, period_str: str) -> dict:
-        """Парсинг периода из строки, поддерживает интервалы (2ч15м) и абсолютные периоды"""
         period_str = period_str.strip().lower()
         
-        # Проверка на интервальный период (содержит ч, м, д с цифрами)
+        # Проверка на интервальный период
         if re.match(r'^\d+[чмд](\d+[чмд])*$', period_str) or re.match(r'^\d+[чмд]\s*\d+[чмд]$', period_str.replace(' ', '')):
             return self._parse_interval_period(period_str)
         
@@ -169,7 +187,6 @@ class RegularMessagesMod(loader.Module):
         raise ValueError("Неверный период")
 
     def _parse_interval_period(self, period_str: str) -> dict:
-        """Парсинг интервального периода типа 2ч15м, 30м, 1ч, 1д"""
         period_str = period_str.replace(' ', '').lower()
         
         total_seconds = 0
@@ -192,7 +209,6 @@ class RegularMessagesMod(loader.Module):
         return {"type": "interval", "seconds": total_seconds}
 
     def _parse_time(self, time_str: str) -> Optional[Tuple[int, int]]:
-        """Парсинг времени из строки, возвращает None если пусто"""
         if not time_str or time_str.strip() == '':
             return None
         
@@ -204,9 +220,8 @@ class RegularMessagesMod(loader.Module):
         return hours, minutes
 
     def _parse_date(self, date_str: str) -> Tuple[int, int]:
-        """Парсинг даты из строки, если пусто - использует текущую дату"""
         if not date_str or date_str.strip() == '':
-            now = datetime.now()
+            now = datetime.now(self.timezone)
             return now.day, now.month
         
         date_str = date_str.strip()
@@ -215,17 +230,18 @@ class RegularMessagesMod(loader.Module):
         
         day, month = map(int, date_str.split('.'))
         
-        current_year = datetime.now().year
+        current_year = datetime.now(self.timezone).year
         try:
-            datetime(current_year, month, day)
+            # Проверяем валидность даты в текущем часовом поясе
+            self.timezone.localize(datetime(current_year, month, day))
         except ValueError:
             raise ValueError("Неверная дата")
         
         return day, month
 
     async def _calculate_next_send(self, msg: dict) -> float:
-        """Вычисление следующего времени отправки для разных типов периодов"""
-        now = datetime.now()
+        """Вычисление следующего времени отправки с учетом часового пояса"""
+        now = datetime.now(self.timezone)
         period = msg["period"]
         period_type = period["type"]
         
@@ -238,7 +254,8 @@ class RegularMessagesMod(loader.Module):
                 current_year = now.year
                 
                 try:
-                    start_date = datetime(current_year, month, day)
+                    # Создаем datetime в указанном часовом поясе
+                    start_date = self.timezone.localize(datetime(current_year, month, day))
                     if start_date < now:
                         if period["seconds"] >= 86400:
                             while start_date < now:
@@ -266,9 +283,9 @@ class RegularMessagesMod(loader.Module):
             
             current_year = now.year
             try:
-                base_date = datetime(current_year, month, day, hours, minutes)
+                base_date = self.timezone.localize(datetime(current_year, month, day, hours, minutes))
             except ValueError:
-                base_date = datetime(current_year + 1, month, day, hours, minutes)
+                base_date = self.timezone.localize(datetime(current_year + 1, month, day, hours, minutes))
             
             if base_date < now:
                 if period_type == "yearly":
@@ -418,7 +435,6 @@ class RegularMessagesMod(loader.Module):
             has_reply = bool(reply and (reply.text or reply.media))
             
             if not args and has_reply:
-                # Только реплай без аргументов - показываем справку
                 await utils.answer(message, self.strings["config_help"])
                 return
             
@@ -442,23 +458,17 @@ class RegularMessagesMod(loader.Module):
             
             # Определяем количество частей
             if has_reply:
-                # Если есть реплай, сообщение берется из реплая
                 if len(parts) < 2 or len(parts) > 4:
                     raise ValueError("Неверное количество аргументов с реплаем")
                 
-                # Проверяем, есть ли текст сообщения в аргументах (последняя часть)
-                # Если есть 4 части и последняя не похожа на дату/время, это может быть сообщение
                 if len(parts) == 4:
-                    # Проверяем, является ли последняя часть датой или временем
                     last_part = parts[-1]
                     is_time = re.match(r'^\d{1,2}:\d{2}$', last_part)
                     is_date = re.match(r'^\d{1,2}\.\d{1,2}$', last_part)
                     
                     if not is_time and not is_date:
-                        # Это сообщение, но у нас есть реплай - игнорируем его
                         parts = parts[:-1]
             else:
-                # Нет реплая, должно быть сообщение в аргументах
                 if len(parts) < 3 or len(parts) > 4:
                     raise ValueError("Неверное количество аргументов без реплая")
             
@@ -469,28 +479,22 @@ class RegularMessagesMod(loader.Module):
             is_interval = period["type"] == "interval"
             
             if is_interval:
-                # Интервальный период
                 if len(parts) == 2:
-                    # период, дата
                     date_str = parts[1]
                     time_tuple = None
                     message_text = ""
                 elif len(parts) == 3:
-                    # период, время (игнорируется), дата
                     time_str, date_str = parts[1], parts[2]
                     time_tuple = self._parse_time(time_str) if time_str else None
                     message_text = ""
                 else:
                     raise ValueError("Неверное количество аргументов для интервального периода")
             else:
-                # Абсолютный период
                 if len(parts) == 3:
-                    # период, время, дата (сообщение из реплая)
                     time_str, date_str = parts[1], parts[2]
                     time_tuple = self._parse_time(time_str) if time_str else None
                     message_text = ""
                 elif len(parts) == 4:
-                    # период, время, дата, сообщение
                     time_str, date_str, message_text = parts[1], parts[2], parts[3]
                     time_tuple = self._parse_time(time_str) if time_str else None
                 else:
@@ -767,7 +771,7 @@ class RegularMessagesMod(loader.Module):
         # Время следующей отправки
         next_send_time = msg.get("next_send", 0)
         if next_send_time:
-            next_send = datetime.fromtimestamp(next_send_time)
+            next_send = datetime.fromtimestamp(next_send_time, self.timezone)
             next_str = next_send.strftime("%d.%m.%Y %H:%M")
         else:
             next_str = "Не рассчитано"
@@ -794,16 +798,16 @@ class RegularMessagesMod(loader.Module):
         buttons = [
             [
                 {"text": "🔄 Вкл/Выкл", "callback": self._toggle_message, "args": (msg_id,)},
-                {"text": "✏️ Изменить период", "callback": self._edit_period, "args": (msg_id,)}
+                {"text": "✏️ Изменить период", "input": self.strings["input_period"], "handler": self._input_period_handler, "args": (msg_id,)}
             ]
         ]
         
         if period_type != "interval":
-            buttons[0].append({"text": "⏰ Изменить время", "callback": self._edit_time, "args": (msg_id,)})
+            buttons[0].append({"text": "⏰ Изменить время", "input": self.strings["input_time"], "handler": self._input_time_handler, "args": (msg_id,)})
         
         buttons.append([
-            {"text": "📆 Изменить дату", "callback": self._edit_date, "args": (msg_id,)},
-            {"text": "💬 Изменить сообщение", "callback": self._edit_text, "args": (msg_id,)}
+            {"text": "📆 Изменить дату", "input": self.strings["input_date"], "handler": self._input_date_handler, "args": (msg_id,)},
+            {"text": "💬 Изменить сообщение", "input": self.strings["input_message"], "handler": self._input_message_handler, "args": (msg_id,)}
         ])
         
         buttons.append([
@@ -825,138 +829,96 @@ class RegularMessagesMod(loader.Module):
             await call.answer(f"Статус изменен: {status}")
             await self._show_message_menu(call, msg_id)
 
-    async def _edit_period(self, call, msg_id):
-        """Начало редактирования периода"""
-        self.editing_data = {"msg_id": msg_id, "field": "period"}
-        await call.edit(
-            self.strings["input_period"],
-            reply_markup=self._get_cancel_keyboard(msg_id)
-        )
-    
-    async def _edit_time(self, call, msg_id):
-        """Начало редактирования времени"""
-        msg = self.messages.get(msg_id)
-        if not msg:
+    async def _input_period_handler(self, call: InlineCall, query: str, msg_id: int):
+        """Обработчик ввода нового периода"""
+        if msg_id not in self.messages:
             await call.answer("Сообщение не найдено")
             return
         
-        period_type = msg["period"]["type"]
-        if period_type == "interval":
-            await call.answer("⚠️ Для интервальных периодов время не требуется")
-            return
-        
-        self.editing_data = {"msg_id": msg_id, "field": "time"}
-        await call.edit(
-            self.strings["input_time"],
-            reply_markup=self._get_cancel_keyboard(msg_id)
-        )
-    
-    async def _edit_date(self, call, msg_id):
-        """Начало редактирования даты"""
-        self.editing_data = {"msg_id": msg_id, "field": "date"}
-        await call.edit(
-            self.strings["input_date"],
-            reply_markup=self._get_cancel_keyboard(msg_id)
-        )
-    
-    async def _edit_text(self, call, msg_id):
-        """Начало редактирования сообщения"""
-        self.editing_data = {"msg_id": msg_id, "field": "message"}
-        await call.edit(
-            self.strings["input_message"],
-            reply_markup=self._get_cancel_keyboard(msg_id)
-        )
-    
-    def _get_cancel_keyboard(self, msg_id):
-        """Клавиатура для отмены редактирования"""
-        return [[{"text": "❌ Отмена", "callback": self._show_message_menu, "args": (msg_id,)}]]
-
-    @loader.inline_handler()
-    async def inline_handler(self, query):
-        """Обработка инлайн запросов для редактирования"""
-        if not self.editing_data:
-            return
-        
-        msg_id = self.editing_data.get("msg_id")
-        field = self.editing_data.get("field")
-        
-        if not msg_id or msg_id not in self.messages:
-            return
-        
-        text = query.query.strip()
-        if not text:
-            return
-        
-        msg = self.messages[msg_id]
-        
         try:
-            if field == "period":
-                period = self._parse_period(text)
-                msg["period"] = period
-                # Для интервальных периодов сбрасываем время
-                if period["type"] == "interval":
-                    msg["time"] = None
-                
-            elif field == "time":
-                time_tuple = self._parse_time(text)
-                msg["time"] = time_tuple
-                
-            elif field == "date":
-                date_tuple = self._parse_date(text)
-                msg["start_date"] = date_tuple
-                
-            elif field == "message":
-                msg["message"] = text
-                # Сбрасываем медиа, если меняем на текст
-                msg["is_media"] = False
-                msg["media_data"] = None
+            period = self._parse_period(query)
+            msg = self.messages[msg_id]
+            msg["period"] = period
+            
+            # Для интервальных периодов сбрасываем время
+            if period["type"] == "interval":
+                msg["time"] = None
             
             # Пересчитываем следующее время отправки
             msg["next_send"] = await self._calculate_next_send(msg)
             self._save_messages()
             
-            # Очищаем данные редактирования
-            self.editing_data = {}
-            
-            # Отправляем подтверждение
-            await query.answer(
-                [{
-                    "type": "article",
-                    "id": "1",
-                    "title": self.strings["updated"],
-                    "description": f"Параметр '{field}' обновлен",
-                    "input_message_content": {
-                        "message_text": f"✅ Параметр '{field}' обновлен для сообщения ID: {msg_id}",
-                        "parse_mode": "HTML"
-                    }
-                }],
-                cache_time=0
-            )
+            await call.answer("✅ Период обновлен")
+            await self._show_message_menu(call, msg_id)
             
         except ValueError as e:
-            error_msg = str(e)
-            if "время" in error_msg:
-                error_text = "❌ Неверный формат времени"
-            elif "дата" in error_msg:
-                error_text = "❌ Неверный формат даты"
-            elif "период" in error_msg:
-                error_text = "❌ Неверный формат периода"
-            else:
-                error_text = f"❌ Ошибка: {error_msg}"
+            await call.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
+
+    async def _input_time_handler(self, call: InlineCall, query: str, msg_id: int):
+        """Обработчик ввода нового времени"""
+        if msg_id not in self.messages:
+            await call.answer("Сообщение не найдено")
+            return
+        
+        msg = self.messages[msg_id]
+        
+        # Проверяем, что период не интервальный
+        if msg["period"]["type"] == "interval":
+            await call.answer("⚠️ Для интервальных периодов время не требуется")
+            return
+        
+        try:
+            time_tuple = self._parse_time(query)
+            msg["time"] = time_tuple
             
-            await query.answer(
-                [{
-                    "type": "article",
-                    "id": "1",
-                    "title": "Ошибка",
-                    "description": error_text,
-                    "input_message_content": {
-                        "message_text": error_text,
-                        "parse_mode": "HTML"
-                    }
-                }],
-                cache_time=0
-            )
+            # Пересчитываем следующее время отправки
+            msg["next_send"] = await self._calculate_next_send(msg)
+            self._save_messages()
+            
+            await call.answer("✅ Время обновлено")
+            await self._show_message_menu(call, msg_id)
+            
+        except ValueError as e:
+            await call.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
+
+    async def _input_date_handler(self, call: InlineCall, query: str, msg_id: int):
+        """Обработчик ввода новой даты"""
+        if msg_id not in self.messages:
+            await call.answer("Сообщение не найдено")
+            return
+        
+        try:
+            date_tuple = self._parse_date(query)
+            msg = self.messages[msg_id]
+            msg["start_date"] = date_tuple
+            
+            # Пересчитываем следующее время отправки
+            msg["next_send"] = await self._calculate_next_send(msg)
+            self._save_messages()
+            
+            await call.answer("✅ Дата обновлена")
+            await self._show_message_menu(call, msg_id)
+            
+        except ValueError as e:
+            await call.answer(f"❌ Ошибка: {str(e)}", show_alert=True)
+
+    async def _input_message_handler(self, call: InlineCall, query: str, msg_id: int):
+        """Обработчик ввода нового сообщения"""
+        if msg_id not in self.messages:
+            await call.answer("Сообщение не найдено")
+            return
+        
+        msg = self.messages[msg_id]
+        msg["message"] = query
+        
+        # Сбрасываем медиа, если меняем на текст
+        msg["is_media"] = False
+        msg["media_data"] = None
+        
+        self._save_messages()
+        
+        await call.answer("✅ Сообщение обновлено")
+        await self._show_message_menu(call, msg_id)
 
     async def _test_send(self, call, msg_id):
         try:
