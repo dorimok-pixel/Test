@@ -1,4 +1,4 @@
-__version__ = (1, 3, 0)
+__version__ = (1, 3, 1)
 # meta developer: @mofkomodules
 # name: MindfulEdit
 
@@ -113,19 +113,12 @@ class MindfulEdit(loader.Module):
     async def _retry_callback(self, call: InlineCall):
         try:
             await call.delete()
-            
-            if hasattr(call, "chat_id") and call.chat_id:
-                await self._send_random_edit_to_chat(call.chat_id)
-            elif hasattr(call, "message") and call.message:
-                await self._send_random_edit(call.message)
-            else:
-                logger.error("No chat_id or message available in callback")
-                
+            chat_id = call.form["chat"]
+            await self._send_random_edit_to_chat(chat_id)
         except Exception as e:
             logger.error(f"Error in retry callback: {e}")
 
     async def _send_random_edit_to_chat(self, chat_id: int, reply_to_msg_id: int = None):
-        """Отправляет случайный эдит в указанный чат"""
         try:
             status_msg = await self.client.send_message(
                 chat_id,
