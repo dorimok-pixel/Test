@@ -1,4 +1,4 @@
-__version__ = (1, 3, 1)
+__version__ = (1, 3, 0)
 # meta developer: @mofkomodules
 # name: MindfulEdit
 
@@ -113,46 +113,56 @@ class MindfulEdit(loader.Module):
     async def _retry_callback(self, call: InlineCall):
         try:
             await call.delete()
-            fake_message = type('obj', (object,), {
-                'peer_id': call.message.peer_id,
-                'reply_to_msg_id': call.message.reply_to_msg_id,
-                'chat_id': call.message.chat_id,
-                '_client': self.client
-            })()
-            await self._send_random_edit(fake_message)
+            
+            if hasattr(call, "chat_id") and call.chat_id:
+                await self._send_random_edit_to_chat(call.chat_id)
+            elif hasattr(call, "message") and call.message:
+                await self._send_random_edit(call.message)
+            else:
+                logger.error("No chat_id or message available in callback")
+                
         except Exception as e:
             logger.error(f"Error in retry callback: {e}")
 
-    async def _send_random_edit(self, message: Message) -> None:
+    async def _send_random_edit_to_chat(self, chat_id: int, reply_to_msg_id: int = None):
+        """Отправляет случайный эдит в указанный чат"""
         try:
-            status_msg = await utils.answer(message, self.strings["sending"])
+            status_msg = await self.client.send_message(
+                chat_id,
+                self.strings["sending"]
+            )
+            
             channels = self._get_all_channels()
             random.shuffle(channels)
             selected_video = None
-            source_channel = None
+            
             for channel in channels:
                 videos = await self._get_videos(channel)
                 if videos:
                     selected_video = random.choice(videos)
-                    source_channel = channel
                     break
+            
             if not selected_video:
-                await utils.answer(status_msg, self.strings["no_videos"])
+                await status_msg.edit(self.strings["no_videos"])
                 return
+
             try:
                 await status_msg.delete()
             except Exception as e:
                 logger.warning(f"Could not delete status message: {e}")
+            
             await self.client.send_message(
-                message.peer_id,
+                chat_id,
                 message=selected_video,
-                reply_to=getattr(message, "reply_to_msg_id", None)
+                reply_to=reply_to_msg_id
             )
+            
             if self.config["show_inline_after_send"]:
                 await asyncio.sleep(2)
+                
                 await self.inline.form(
                     text=self.strings["inline_question"],
-                    message=message,
+                    message=status_msg,
                     reply_markup=[
                         [
                             {"text": self.strings["btn_retry"], "callback": self._retry_callback},
@@ -160,9 +170,15 @@ class MindfulEdit(loader.Module):
                         ]
                     ]
                 )
+                    
         except Exception as e:
-            logger.error(f"Error sending edit: {e}")
-            await utils.answer(message, self.strings["error"])
+            logger.error(f"Error sending edit to chat: {e}")
+
+    async def _send_random_edit(self, message: Message) -> None:
+        await self._send_random_edit_to_chat(
+            message.chat_id,
+            getattr(message, "reply_to_msg_id", None)
+        )
 
     @loader.command(
         en_doc="Send random edit",
