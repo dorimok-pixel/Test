@@ -161,6 +161,10 @@ class FontChanger(loader.Module):
         if not original_text:
             return
         
+        prefix = self.get_prefix()
+        if original_text.startswith(prefix):
+            return
+        
         font_name = self.config["current_font"]
         if font_name not in self._font_maps:
             return
@@ -240,4 +244,4 @@ class FontChanger(loader.Module):
             f"🔤 Тест шрифта '{font_name}':\n"
             f"Оригинал: {args}\n"
             f"Конвертация: {converted}"
-            ) 
+            )
