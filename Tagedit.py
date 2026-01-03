@@ -1,6 +1,7 @@
 # meta developer: @mofkomodules
 # name: MTagEditor
 # desc: Редактор тегов MP3 файлов
+# version: 1.0.0
 
 import asyncio
 import io
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 @loader.tds
 class MTagEditor(loader.Module):
+    """Модуль для редактирования тегов MP3 файлов (ID3 тегов)"""
+    
     strings = {"name": "MTagEditor"}
     strings_ru = strings
 
@@ -38,11 +41,6 @@ class MTagEditor(loader.Module):
                 "auto_fill_from_filename",
                 True,
                 validator=loader.validators.Boolean(),
-            ),
-            loader.ConfigValue(
-                "cover_quality",
-                2,
-                validator=loader.validators.Integer(minimum=0, maximum=2),
             ),
         )
         self.current_files = {}
@@ -131,8 +129,11 @@ class MTagEditor(loader.Module):
             pass
         return None
 
-    @loader.command(ru_doc="[reply] - Показать теги MP3 файла")
+    @loader.command(
+        ru_doc="[reply] - Показать и редактировать теги MP3 файла (артист, название, альбом, жанр, год, номер трека, текст песни, комментарий)"
+    )
     async def mtag(self, message):
+        """[reply] - Показать и редактировать теги MP3 файла"""
         if not MUTAGEN_AVAILABLE:
             await utils.answer(message, "❗️ <b>Библиотека mutagen не установлена!</b>\nУстановите: <code>pip install mutagen</code>")
             return
@@ -259,10 +260,11 @@ class MTagEditor(loader.Module):
         
         input_text = f"Введите значение для {tag}"
         if tag == 'track':
-            input_text = "Введите номер трека в формате: номер/всего (например: 1/10)"
+            input_text = "Введите номер трека в формате: номер/всего (например: 1/10)\nПервый номер - номер трека, второй - количество треков в альбоме"
         
         await call.edit(
-            f"✍️ Введите значение для <b>{tag}</b>:" + ("\n\nФормат для трека: номер/всего (например: 1/10)" if tag == 'track' else ""),
+            f"✍️ Введите значение для <b>{tag}</b>:" + 
+            ("\n\n📝 Формат: <b>номер/всего</b>\nПример: <code>1/10</code> - первый трек из десяти" if tag == 'track' else ""),
             reply_markup=[
                 [
                     {
@@ -395,16 +397,20 @@ class MTagEditor(loader.Module):
             await call.answer("Файл не найден!", show_alert=True)
             return
         
+        file_info = self.current_files[message_id]
+        chat_id = file_info['original_message'].chat_id
+        
         self.waiting_for_cover[call.from_user.id] = {
             'message_id': message_id,
             'filepath': filepath,
-            'chat_id': call.chat_id,
+            'chat_id': chat_id,
             'user_id': call.from_user.id
         }
         
         await call.edit(
             "🖼 <b>Отправьте фото для установки обложки</b>\n"
-            "Следующее отправленное вами фото в этот чат будет установлено как обложка.",
+            f"Следующее отправленное вами фото в этот чат будет установлено как обложка.\n"
+            f"<i>Chat ID: {chat_id}</i>",
             reply_markup=[
                 [
                     {"text": "🔙 Назад", "callback": self._show_tags, "args": (message_id,)}
@@ -431,6 +437,7 @@ class MTagEditor(loader.Module):
             return
         
         file_info = self.current_files[message_id]
+        chat_id = file_info['original_message'].chat_id
         
         try:
             with open(file_info['path'], 'rb') as f:
@@ -452,14 +459,15 @@ class MTagEditor(loader.Module):
             file_io.name = filename
             
             await self._client.send_file(
-                call.chat_id,
+                chat_id,
                 file=file_io,
                 caption="💾 <b>Файл сохранен!</b>",
-                reply_to=call.message_id
+                reply_to=file_info['original_message'].id
             )
+            await call.answer("✅ Файл отправлен в чат!", show_alert=True)
         except Exception as e:
             logger.error(f"Error saving file: {e}")
-            await call.answer("Ошибка сохранения файла!", show_alert=True)
+            await call.answer("❌ Ошибка сохранения файла!", show_alert=True)
 
     @loader.watcher(only_incoming=True)
     async def watcher(self, message):
@@ -471,8 +479,9 @@ class MTagEditor(loader.Module):
             return
         
         cover_info = self.waiting_for_cover[user_id]
+        chat_id = utils.get_chat_id(message)
         
-        if message.chat_id != cover_info['chat_id']:
+        if chat_id != cover_info['chat_id']:
             return
         
         message_id = cover_info['message_id']
