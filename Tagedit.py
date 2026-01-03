@@ -206,8 +206,7 @@ class MTagEditor(loader.Module):
                     
                     self.current_files[reply.id] = {
                         'path': temp_file,
-                        'original_message': reply.id,
-                        'chat_id': utils.get_chat_id(message),
+                        'original_message': reply,
                         'tags': tags,
                         'cover': cover_info
                     }
@@ -258,13 +257,17 @@ class MTagEditor(loader.Module):
         
         current_value = self.current_files[message_id]['tags'].get(tag, '')
         
+        input_text = f"Введите значение для {tag}"
+        if tag == 'track':
+            input_text = "Введите номер трека в формате: номер/всего (например: 1/10)"
+        
         await call.edit(
-            f"✍️ Введите значение для <b>{tag}</b>:",
+            f"✍️ Введите значение для <b>{tag}</b>:" + ("\n\nФормат для трека: номер/всего (например: 1/10)" if tag == 'track' else ""),
             reply_markup=[
                 [
                     {
                         "text": "✍️ Ввести значение",
-                        "input": f"Введите значение для {tag} (например: 1/10 для трека)",
+                        "input": input_text,
                         "handler": self._update_tag,
                         "kwargs": {"message_id": message_id, "tag": tag, "current": current_value}
                     }
@@ -392,16 +395,16 @@ class MTagEditor(loader.Module):
             await call.answer("Файл не найден!", show_alert=True)
             return
         
-        file_info = self.current_files[message_id]
         self.waiting_for_cover[call.from_user.id] = {
             'message_id': message_id,
             'filepath': filepath,
-            'call': call
+            'chat_id': call.chat_id,
+            'user_id': call.from_user.id
         }
         
         await call.edit(
             "🖼 <b>Отправьте фото для установки обложки</b>\n"
-            "Следующее отправленное вами фото будет установлено как обложка.",
+            "Следующее отправленное вами фото в этот чат будет установлено как обложка.",
             reply_markup=[
                 [
                     {"text": "🔙 Назад", "callback": self._show_tags, "args": (message_id,)}
@@ -434,14 +437,10 @@ class MTagEditor(loader.Module):
                 file_data = f.read()
             
             file_io = io.BytesIO(file_data)
-            import re
             filename = "edited_"
-            reply = await self._client.get_messages(
-                file_info['original_message'].chat_id,
-                ids=file_info['original_message']
-            )
+            
             doc_attr = next(
-                (attr for attr in reply.document.attributes 
+                (attr for attr in file_info['original_message'].document.attributes 
                  if isinstance(attr, DocumentAttributeFilename)),
                 None
             )
@@ -453,7 +452,7 @@ class MTagEditor(loader.Module):
             file_io.name = filename
             
             await self._client.send_file(
-                file_info['chat_id'],
+                call.chat_id,
                 file=file_io,
                 caption="💾 <b>Файл сохранен!</b>",
                 reply_to=call.message_id
@@ -467,21 +466,31 @@ class MTagEditor(loader.Module):
         if not message.photo or message.out:
             return
         
-        user_id = message.from_id.user_id if hasattr(message.from_id, 'user_id') else None
+        user_id = message.sender_id
         if not user_id or user_id not in self.waiting_for_cover:
             return
         
-        cover_info = self.waiting_for_cover.pop(user_id)
+        cover_info = self.waiting_for_cover[user_id]
+        
+        if message.chat_id != cover_info['chat_id']:
+            return
+        
         message_id = cover_info['message_id']
         
         if message_id not in self.current_files:
             await message.reply("❌ Файл больше не доступен")
+            if user_id in self.waiting_for_cover:
+                del self.waiting_for_cover[user_id]
             return
         
         try:
             cover_data = await message.download_media(bytes)
             
             audio = MP3(self.current_files[message_id]['path'], ID3=ID3)
+            
+            if not audio.tags:
+                audio.add_tags()
+            
             audio.tags.add(
                 APIC(
                     encoding=3,
@@ -497,16 +506,16 @@ class MTagEditor(loader.Module):
             
             await message.reply("✅ <b>Обложка установлена!</b>")
             
-            if cover_info.get('call'):
-                await cover_info['call'].edit(
-                    "✅ <b>Обложка установлена!</b>",
-                    reply_markup=[
-                        [
-                            {"text": "🔙 Назад", "callback": self._show_tags, "args": (message_id,)}
-                        ]
-                    ]
-                )
+            if user_id in self.waiting_for_cover:
+                del self.waiting_for_cover[user_id]
+                
+            try:
+                await message.delete()
+            except:
+                pass
                 
         except Exception as e:
             logger.error(f"Error setting cover: {e}")
             await message.reply("❌ <b>Ошибка установки обложки</b>")
+            if user_id in self.waiting_for_cover:
+                del self.waiting_for_cover[user_id] 
