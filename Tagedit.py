@@ -7,21 +7,17 @@ import io
 import logging
 import os
 import tempfile
-from pathlib import Path
 
 try:
-    from mutagen import File as MutagenFile
-    from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TCOM, TPE2, TPOS, USLT, COMM
+    from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TCON, USLT, COMM
     from mutagen.mp3 import MP3
-    from mutagen.easyid3 import EasyID3
     MUTAGEN_AVAILABLE = True
 except ImportError:
     MUTAGEN_AVAILABLE = False
 
 from telethon.tl.types import Message, DocumentAttributeFilename
-from telethon.utils import get_display_name
-
 from .. import loader, utils
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -44,29 +40,20 @@ class MTagEditor(loader.Module):
                 validator=loader.validators.Boolean(),
             ),
             loader.ConfigValue(
-                "filename_pattern",
-                "{artist} - {title}",
-                validator=loader.validators.String(),
-            ),
-            loader.ConfigValue(
                 "cover_quality",
                 2,
                 validator=loader.validators.Integer(minimum=0, maximum=2),
             ),
         )
         self.current_files = {}
+        self.waiting_for_cover = {}
         self._lock = asyncio.Lock()
 
     async def client_ready(self, client, db):
         self._client = client
         self._db = db
-        self.me = await client.get_me()
         if not MUTAGEN_AVAILABLE:
             logger.error("Mutagen не установлен!")
-        else:
-            EasyID3.RegisterTextKey('albumartist', 'TPE2')
-            EasyID3.RegisterTextKey('discnumber', 'TPOS')
-            EasyID3.RegisterTextKey('lyrics', 'USLT')
 
     def _format_duration(self, seconds):
         minutes = int(seconds // 60)
@@ -96,54 +83,37 @@ class MTagEditor(loader.Module):
     def _read_tags(self, filepath):
         try:
             audio = MP3(filepath, ID3=ID3)
-        except Exception:
-            try:
-                audio = EasyID3(filepath)
-            except Exception as e:
-                raise Exception(f"Не удалось прочитать теги: {e}")
+        except Exception as e:
+            raise Exception(f"Не удалось прочитать теги: {e}")
 
         tags = {
             'artist': '', 'title': '', 'album': '', 'genre': '', 'year': '',
-            'track': '', 'total_tracks': '', 'album_artist': '', 'disc': '',
-            'total_discs': '', 'lyrics': '', 'comment': '',
+            'track': '', 'total_tracks': '', 'lyrics': '', 'comment': '',
             'bitrate': getattr(audio.info, 'bitrate', 0) // 1000 if hasattr(audio.info, 'bitrate') else 0,
             'duration': self._format_duration(audio.info.length) if hasattr(audio.info, 'length') else '0:00',
         }
 
-        if isinstance(audio, EasyID3):
-            for key in tags:
-                if key in audio:
-                    tags[key] = ', '.join(audio[key]) if isinstance(audio[key], list) else str(audio[key])
-        else:
-            id3 = ID3(filepath)
-            if 'TPE1' in id3:
-                tags['artist'] = str(id3['TPE1'])
-            if 'TIT2' in id3:
-                tags['title'] = str(id3['TIT2'])
-            if 'TALB' in id3:
-                tags['album'] = str(id3['TALB'])
-            if 'TDRC' in id3:
-                tags['year'] = str(id3['TDRC'])[:4]
-            if 'TRCK' in id3:
-                track = str(id3['TRCK'])
-                if '/' in track:
-                    tags['track'], tags['total_tracks'] = track.split('/', 1)
-                else:
-                    tags['track'] = track
-            if 'TCON' in id3:
-                tags['genre'] = str(id3['TCON'])
-            if 'TPE2' in id3:
-                tags['album_artist'] = str(id3['TPE2'])
-            if 'TPOS' in id3:
-                disc = str(id3['TPOS'])
-                if '/' in disc:
-                    tags['disc'], tags['total_discs'] = disc.split('/', 1)
-                else:
-                    tags['disc'] = disc
-            if 'USLT' in id3:
-                tags['lyrics'] = str(id3['USLT'])
-            if 'COMM' in id3:
-                tags['comment'] = str(id3['COMM'])
+        id3 = ID3(filepath)
+        if 'TPE1' in id3:
+            tags['artist'] = str(id3['TPE1'])
+        if 'TIT2' in id3:
+            tags['title'] = str(id3['TIT2'])
+        if 'TALB' in id3:
+            tags['album'] = str(id3['TALB'])
+        if 'TDRC' in id3:
+            tags['year'] = str(id3['TDRC'])[:4]
+        if 'TRCK' in id3:
+            track = str(id3['TRCK'])
+            if '/' in track:
+                tags['track'], tags['total_tracks'] = track.split('/', 1)
+            else:
+                tags['track'] = track
+        if 'TCON' in id3:
+            tags['genre'] = str(id3['TCON'])
+        if 'USLT' in id3:
+            tags['lyrics'] = str(id3['USLT'])
+        if 'COMM' in id3:
+            tags['comment'] = str(id3['COMM'])
 
         return tags
 
@@ -152,31 +122,14 @@ class MTagEditor(loader.Module):
             id3 = ID3(filepath)
             if 'APIC:' in id3:
                 apic = id3['APIC:']
-                return {'data': apic.data, 'mime': apic.mime, 'width': 0, 'height': 0}
+                return {'data': apic.data, 'mime': apic.mime}
             for key in id3.keys():
                 if key.startswith('APIC'):
                     apic = id3[key]
-                    return {'data': apic.data, 'mime': apic.mime, 'width': 0, 'height': 0}
+                    return {'data': apic.data, 'mime': apic.mime}
         except Exception:
             pass
         return None
-
-    def _extract_filename_tags(self, filename):
-        result = {}
-        name = os.path.splitext(filename)[0]
-        import re
-        patterns = [
-            r'^(?P<artist>.+?) - (?P<title>.+?)$',
-            r'^(?P<artist>.+?) – (?P<title>.+?)$',
-            r'^(?P<track>\d+)\.?\s*(?P<artist>.+?) - (?P<title>.+?)$',
-            r'^(?P<title>.+?)$',
-        ]
-        for pattern in patterns:
-            match = re.match(pattern, name)
-            if match:
-                result.update(match.groupdict())
-                break
-        return result
 
     @loader.command(ru_doc="[reply] - Показать теги MP3 файла")
     async def mtag(self, message):
@@ -218,8 +171,6 @@ class MTagEditor(loader.Module):
                         "🎼 <b>Жанр:</b> {genre}\n"
                         "📅 <b>Год:</b> {year}\n"
                         "🔢 <b>Трек:</b> {track}/{total_tracks}\n"
-                        "👥 <b>Альбомный артист:</b> {album_artist}\n"
-                        "📁 <b>Диск:</b> {disc}/{total_discs}\n"
                         "📊 <b>Битрейт:</b> {bitrate} kbps\n"
                         "⏱ <b>Длительность:</b> {duration}\n"
                         "📏 <b>Размер:</b> {size}\n"
@@ -232,28 +183,19 @@ class MTagEditor(loader.Module):
                         year=tags['year'] or 'Не указан',
                         track=tags['track'] or '0',
                         total_tracks=tags['total_tracks'] or '0',
-                        album_artist=tags['album_artist'] or 'Не указан',
-                        disc=tags['disc'] or '0',
-                        total_discs=tags['total_discs'] or '0',
                         bitrate=tags['bitrate'],
                         duration=tags['duration'],
                         size=self._format_size(file_info['size']),
                     )
                     
-                    cover_text = ""
+                    cover_text = "\n\n📸 <b>Обложка отсутствует</b>"
                     if cover_info:
-                        cover_text = f"\n\n📸 <b>Текущая обложка:</b>\nРазмер: ?x?"
-                    else:
-                        cover_text = f"\n\n📸 <b>Обложка отсутствует</b>"
+                        cover_text = f"\n\n📸 <b>Обложка присутствует</b>"
                     
                     buttons = [
                         [
                             {"text": "✏️ Редактировать теги", "callback": self._edit_tags_menu, "args": (reply.id, temp_file)},
-                            {"text": "🖼 Извлечь обложку", "callback": self._extract_cover, "args": (reply.id, temp_file)},
-                        ],
-                        [
-                            {"text": "🖼 Установить обложку", "callback": self._set_cover, "args": (reply.id, temp_file)},
-                            {"text": "🤖 Автозаполнение", "callback": self._auto_fill_tags, "args": (reply.id, temp_file)},
+                            {"text": "🖼 Установить обложку", "callback": self._set_cover_start, "args": (reply.id, temp_file)},
                         ],
                         [
                             {"text": "🗑 Очистить теги", "callback": self._clear_tags, "args": (reply.id, temp_file)},
@@ -265,6 +207,7 @@ class MTagEditor(loader.Module):
                     self.current_files[reply.id] = {
                         'path': temp_file,
                         'original_message': reply.id,
+                        'chat_id': utils.get_chat_id(message),
                         'tags': tags,
                         'cover': cover_info
                     }
@@ -278,7 +221,7 @@ class MTagEditor(loader.Module):
             logger.error(f"Error reading tags: {e}")
             await utils.answer(status_msg, f"❗️ <b>Ошибка чтения файла:</b>\n<code>{str(e)}</code>")
 
-    async def _edit_tags_menu(self, call, message_id, filepath):
+    async def _edit_tags_menu(self, call: InlineCall, message_id, filepath):
         if message_id not in self.current_files:
             await call.answer("Файл не найден!", show_alert=True)
             return
@@ -297,10 +240,6 @@ class MTagEditor(loader.Module):
                 {"text": "🔢 Номер трека", "callback": self._edit_tag, "args": (message_id, 'track')},
             ],
             [
-                {"text": "👥 Альбомный артист", "callback": self._edit_tag, "args": (message_id, 'album_artist')},
-                {"text": "📁 Номер диска", "callback": self._edit_tag, "args": (message_id, 'disc')},
-            ],
-            [
                 {"text": "📝 Текст песни", "callback": self._edit_tag, "args": (message_id, 'lyrics')},
                 {"text": "💬 Комментарий", "callback": self._edit_tag, "args": (message_id, 'comment')},
             ],
@@ -312,7 +251,7 @@ class MTagEditor(loader.Module):
         
         await call.edit("✏️ <b>Редактирование тегов:</b>\nВыберите тег для редактирования", reply_markup=buttons)
 
-    async def _edit_tag(self, call, message_id, tag):
+    async def _edit_tag(self, call: InlineCall, message_id, tag):
         if message_id not in self.current_files:
             await call.answer("Файл не найден!", show_alert=True)
             return
@@ -325,7 +264,7 @@ class MTagEditor(loader.Module):
                 [
                     {
                         "text": "✍️ Ввести значение",
-                        "input": f"Введите значение для {tag}",
+                        "input": f"Введите значение для {tag} (например: 1/10 для трека)",
                         "handler": self._update_tag,
                         "kwargs": {"message_id": message_id, "tag": tag, "current": current_value}
                     }
@@ -336,7 +275,7 @@ class MTagEditor(loader.Module):
             ]
         )
 
-    async def _update_tag(self, call, query, message_id, tag, current):
+    async def _update_tag(self, call: InlineCall, query, message_id, tag, current):
         if message_id not in self.current_files:
             await call.answer("Файл не найден!", show_alert=True)
             return
@@ -348,26 +287,12 @@ class MTagEditor(loader.Module):
                     self.current_files[message_id]['tags']['track'] = track_parts[0]
                     self.current_files[message_id]['tags']['total_tracks'] = track_parts[1]
                 else:
-                    await call.answer("❗️ <b>Неверный формат номера трека!</b>\nИспользуйте: номер/всего", show_alert=True)
+                    await call.answer("❗️ <b>Неверный формат!</b>\nИспользуйте: номер/всего (например: 1/10)", show_alert=True)
                     return
             elif query.isdigit():
                 self.current_files[message_id]['tags']['track'] = query
             elif query:
-                await call.answer("❗️ <b>Неверный формат номера трека!</b>\nИспользуйте: номер/всего", show_alert=True)
-                return
-        elif tag == 'disc':
-            if query and '/' in query:
-                disc_parts = query.split('/')
-                if len(disc_parts) == 2 and disc_parts[0].isdigit() and disc_parts[1].isdigit():
-                    self.current_files[message_id]['tags']['disc'] = disc_parts[0]
-                    self.current_files[message_id]['tags']['total_discs'] = disc_parts[1]
-                else:
-                    await call.answer("❗️ <b>Неверный формат номера диска!</b>\nИспользуйте: номер/всего", show_alert=True)
-                    return
-            elif query.isdigit():
-                self.current_files[message_id]['tags']['disc'] = query
-            elif query:
-                await call.answer("❗️ <b>Неверный формат номера диска!</b>\nИспользуйте: номер/всего", show_alert=True)
+                await call.answer("❗️ <b>Неверный формат!</b>\nИспользуйте: номер/всего (например: 1/10)", show_alert=True)
                 return
         else:
             self.current_files[message_id]['tags'][tag] = query
@@ -407,11 +332,6 @@ class MTagEditor(loader.Module):
                 audio['TRCK'] = TRCK(encoding=3, text=track_str)
             if tags['genre']:
                 audio['TCON'] = TCON(encoding=3, text=tags['genre'])
-            if tags['album_artist']:
-                audio['TPE2'] = TPE2(encoding=3, text=tags['album_artist'])
-            if tags['disc'] or tags['total_discs']:
-                disc_str = f"{tags['disc'] or 0}/{tags['total_discs'] or 0}"
-                audio['TPOS'] = TPOS(encoding=3, text=disc_str)
             if tags['lyrics']:
                 audio['USLT'] = USLT(encoding=3, text=tags['lyrics'])
             if tags['comment']:
@@ -422,13 +342,14 @@ class MTagEditor(loader.Module):
         except Exception as e:
             logger.error(f"Error saving tags: {e}")
 
-    async def _show_tags(self, call, message_id):
+    async def _show_tags(self, call: InlineCall, message_id):
         if message_id not in self.current_files:
             await call.answer("Файл не найден!", show_alert=True)
             return
         
         file_info = self.current_files[message_id]
         tags = file_info['tags']
+        cover_info = self._get_cover_info(file_info['path'])
         
         tags_display = (
             "🎵 <b>Теги MP3 файла:</b>\n"
@@ -439,8 +360,6 @@ class MTagEditor(loader.Module):
             "🎼 <b>Жанр:</b> {genre}\n"
             "📅 <b>Год:</b> {year}\n"
             "🔢 <b>Трек:</b> {track}/{total_tracks}\n"
-            "👥 <b>Альбомный артист:</b> {album_artist}\n"
-            "📁 <b>Диск:</b> {disc}/{total_discs}\n"
             "<b>─────────────────</b>"
         ).format(
             artist=tags['artist'] or 'Не указан',
@@ -450,55 +369,39 @@ class MTagEditor(loader.Module):
             year=tags['year'] or 'Не указан',
             track=tags['track'] or '0',
             total_tracks=tags['total_tracks'] or '0',
-            album_artist=tags['album_artist'] or 'Не указан',
-            disc=tags['disc'] or '0',
-            total_discs=tags['total_discs'] or '0',
         )
+        
+        cover_text = "\n\n📸 <b>Обложка отсутствует</b>"
+        if cover_info:
+            cover_text = f"\n\n📸 <b>Обложка присутствует</b>"
         
         buttons = [
             [
                 {"text": "✏️ Редактировать теги", "callback": self._edit_tags_menu, "args": (message_id, file_info['path'])},
-                {"text": "🖼 Извлечь обложку", "callback": self._extract_cover, "args": (message_id, file_info['path'])},
-            ],
-            [
-                {"text": "🖼 Установить обложку", "callback": self._set_cover, "args": (message_id, file_info['path'])},
-                {"text": "🤖 Автозаполнение", "callback": self._auto_fill_tags, "args": (message_id, file_info['path'])},
+                {"text": "🖼 Установить обложку", "callback": self._set_cover_start, "args": (message_id, file_info['path'])},
             ],
             [
                 {"text": "🗑 Очистить теги", "callback": self._clear_tags, "args": (message_id, file_info['path'])},
             ]
         ]
         
-        await call.edit(tags_display, reply_markup=buttons)
+        await call.edit(tags_display + cover_text, reply_markup=buttons)
 
-    async def _extract_cover(self, call, message_id, filepath):
+    async def _set_cover_start(self, call: InlineCall, message_id, filepath):
         if message_id not in self.current_files:
             await call.answer("Файл не найден!", show_alert=True)
             return
         
-        cover_info = self._get_cover_info(filepath)
-        if not cover_info:
-            await call.answer("Обложка не найдена!", show_alert=True)
-            return
-        
-        try:
-            await self._client.send_file(
-                call.chat_id,
-                file=io.BytesIO(cover_info['data']),
-                caption="✅ <b>Обложка извлечена и отправлена!</b>",
-                reply_to=call.message_id
-            )
-        except Exception as e:
-            logger.error(f"Error sending cover: {e}")
-            await call.answer("Ошибка отправки обложки!", show_alert=True)
-
-    async def _set_cover(self, call, message_id, filepath):
-        if message_id not in self.current_files:
-            await call.answer("Файл не найден!", show_alert=True)
-            return
+        file_info = self.current_files[message_id]
+        self.waiting_for_cover[call.from_user.id] = {
+            'message_id': message_id,
+            'filepath': filepath,
+            'call': call
+        }
         
         await call.edit(
-            "📸 <b>Ответьте на изображение для установки обложки</b>",
+            "🖼 <b>Отправьте фото для установки обложки</b>\n"
+            "Следующее отправленное вами фото будет установлено как обложка.",
             reply_markup=[
                 [
                     {"text": "🔙 Назад", "callback": self._show_tags, "args": (message_id,)}
@@ -506,43 +409,7 @@ class MTagEditor(loader.Module):
             ]
         )
 
-    async def _auto_fill_tags(self, call, message_id, filepath):
-        if message_id not in self.current_files:
-            await call.answer("Файл не найден!", show_alert=True)
-            return
-        
-        if not self.config["auto_fill_from_filename"]:
-            await call.answer("Автозаполнение отключено в конфиге!", show_alert=True)
-            return
-        
-        reply = await self._client.get_messages(
-            self.current_files[message_id]['original_message'].chat_id,
-            ids=self.current_files[message_id]['original_message']
-        )
-        
-        filename = next(
-            (attr.file_name for attr in reply.document.attributes 
-             if isinstance(attr, DocumentAttributeFilename)),
-            "unknown.mp3"
-        )
-        
-        extracted = self._extract_filename_tags(filename)
-        
-        if extracted.get('artist'):
-            self.current_files[message_id]['tags']['artist'] = extracted['artist']
-        if extracted.get('title'):
-            self.current_files[message_id]['tags']['title'] = extracted['title']
-        if extracted.get('track'):
-            self.current_files[message_id]['tags']['track'] = extracted['track']
-        
-        if self.config["default_genre"]:
-            self.current_files[message_id]['tags']['genre'] = self.config["default_genre"]
-        
-        await self._apply_tags_to_file(message_id)
-        await call.answer("✅ <b>Автозаполнение завершено!</b>", show_alert=True)
-        await self._show_tags(call, message_id)
-
-    async def _clear_tags(self, call, message_id, filepath):
+    async def _clear_tags(self, call: InlineCall, message_id, filepath):
         if message_id not in self.current_files:
             await call.answer("Файл не найден!", show_alert=True)
             return
@@ -555,7 +422,7 @@ class MTagEditor(loader.Module):
         await call.answer("✅ <b>Все теги очищены!</b>", show_alert=True)
         await self._show_tags(call, message_id)
 
-    async def _save_file(self, call, message_id):
+    async def _save_file(self, call: InlineCall, message_id):
         if message_id not in self.current_files:
             await call.answer("Файл не найден!", show_alert=True)
             return
@@ -567,10 +434,26 @@ class MTagEditor(loader.Module):
                 file_data = f.read()
             
             file_io = io.BytesIO(file_data)
-            file_io.name = "edited_" + os.path.basename(file_info['path'])
+            import re
+            filename = "edited_"
+            reply = await self._client.get_messages(
+                file_info['original_message'].chat_id,
+                ids=file_info['original_message']
+            )
+            doc_attr = next(
+                (attr for attr in reply.document.attributes 
+                 if isinstance(attr, DocumentAttributeFilename)),
+                None
+            )
+            if doc_attr:
+                filename += doc_attr.file_name
+            else:
+                filename += "audio.mp3"
+            
+            file_io.name = filename
             
             await self._client.send_file(
-                call.chat_id,
+                file_info['chat_id'],
                 file=file_io,
                 caption="💾 <b>Файл сохранен!</b>",
                 reply_to=call.message_id
@@ -578,3 +461,52 @@ class MTagEditor(loader.Module):
         except Exception as e:
             logger.error(f"Error saving file: {e}")
             await call.answer("Ошибка сохранения файла!", show_alert=True)
+
+    @loader.watcher(only_incoming=True)
+    async def watcher(self, message):
+        if not message.photo or message.out:
+            return
+        
+        user_id = message.from_id.user_id if hasattr(message.from_id, 'user_id') else None
+        if not user_id or user_id not in self.waiting_for_cover:
+            return
+        
+        cover_info = self.waiting_for_cover.pop(user_id)
+        message_id = cover_info['message_id']
+        
+        if message_id not in self.current_files:
+            await message.reply("❌ Файл больше не доступен")
+            return
+        
+        try:
+            cover_data = await message.download_media(bytes)
+            
+            audio = MP3(self.current_files[message_id]['path'], ID3=ID3)
+            audio.tags.add(
+                APIC(
+                    encoding=3,
+                    mime='image/jpeg',
+                    type=3,
+                    desc='Cover',
+                    data=cover_data
+                )
+            )
+            audio.save()
+            
+            self.current_files[message_id]['cover'] = {'data': cover_data, 'mime': 'image/jpeg'}
+            
+            await message.reply("✅ <b>Обложка установлена!</b>")
+            
+            if cover_info.get('call'):
+                await cover_info['call'].edit(
+                    "✅ <b>Обложка установлена!</b>",
+                    reply_markup=[
+                        [
+                            {"text": "🔙 Назад", "callback": self._show_tags, "args": (message_id,)}
+                        ]
+                    ]
+                )
+                
+        except Exception as e:
+            logger.error(f"Error setting cover: {e}")
+            await message.reply("❌ <b>Ошибка установки обложки</b>")
