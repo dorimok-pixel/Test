@@ -134,12 +134,12 @@ class MTagEditor(loader.Module):
     async def mtag(self, message):
         """[reply] - Показать и редактировать теги MP3 файла"""
         if not MUTAGEN_AVAILABLE:
-            await utils.answer(message, "❗️ <b>Библиотека mutagen не установлена!</b>\nУстановите: <code>pip install mutagen</code>")
+            await utils.answer(message, "<emoji document_id=5296258510684712098>💬</emoji> <b>Библиотека mutagen не установлена!</b>\установите и перезагрузитесь: <code>pip install mutagen</code>")
             return
 
         reply = await message.get_reply_message()
         if not reply or not reply.document:
-            await utils.answer(message, "❗️ <b>Ответьте на MP3 файл!</b>")
+            await utils.answer(message, "<emoji document_id=5296258510684712098>💬</emoji> <b>Ответьте на MP3 файл!</b>")
             return
 
         mime_type = getattr(reply.document, 'mime_type', '')
@@ -149,7 +149,7 @@ class MTagEditor(loader.Module):
         
         if not filename or not filename.lower().endswith('.mp3'):
             if not mime_type or 'audio/mpeg' not in mime_type:
-                await utils.answer(message, "❗️ <b>Файл не является MP3!</b>")
+                await utils.answer(message, "<emoji document_id=5296258510684712098>💬</emoji> <b>Файл не является MP3!</b>")
                 return
 
         status_msg = await utils.answer(message, "<emoji document_id=5303059389534466718>🦖</emoji> <b>Обработка файла...</b>")
@@ -421,7 +421,7 @@ class MTagEditor(loader.Module):
             await self._client.send_file(
                 chat_id,
                 file=file_io,
-                caption="💾 <b>Файл сохранен!</b>",
+                caption="<emoji document_id=5373342633798167891>💾</emoji> <b>Файл сохранен!</b>",
                 reply_to=file_info['original_message'].id
             )
             await call.answer("✅ Файл отправлен в чат!", show_alert=True)
