@@ -1,7 +1,21 @@
+# 　　　　　|
+# 　　　　　|
+# 　　　　　|
+# 　　　　　|
+# 　　　　　|
+# 　／￣￣＼|
+# ＜ ´･ 　　 |＼
+# 　|　３　 | 丶＼
+# ＜ 、･　　|　　＼
+# 　＼＿＿／∪ _ ∪)
+# 　　　　　 Ｕ Ｕ
+#
+#                                     (╬ Ò﹏Ó) 
 # meta developer: @mofkomodules
 # name: MTagEditor
 # desc: Редактор тегов MP3 файлов
-# version: 1.0.0
+
+__version__ = (1, 0, 0)
 
 import asyncio
 import io
@@ -10,7 +24,7 @@ import os
 import tempfile
 
 try:
-    from mutagen.id3 import ID3, APIC, TIT2, TPE1, TALB, TDRC, TRCK, TCON, USLT, COMM
+    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, USLT, COMM
     from mutagen.mp3 import MP3
     MUTAGEN_AVAILABLE = True
 except ImportError:
@@ -44,7 +58,6 @@ class MTagEditor(loader.Module):
             ),
         )
         self.current_files = {}
-        self.waiting_for_cover = {}
         self._lock = asyncio.Lock()
 
     async def client_ready(self, client, db):
@@ -115,20 +128,6 @@ class MTagEditor(loader.Module):
 
         return tags
 
-    def _get_cover_info(self, filepath):
-        try:
-            id3 = ID3(filepath)
-            if 'APIC:' in id3:
-                apic = id3['APIC:']
-                return {'data': apic.data, 'mime': apic.mime}
-            for key in id3.keys():
-                if key.startswith('APIC'):
-                    apic = id3[key]
-                    return {'data': apic.data, 'mime': apic.mime}
-        except Exception:
-            pass
-        return None
-
     @loader.command(
         ru_doc="[reply] - Показать и редактировать теги MP3 файла (артист, название, альбом, жанр, год, номер трека, текст песни, комментарий)"
     )
@@ -153,7 +152,7 @@ class MTagEditor(loader.Module):
                 await utils.answer(message, "❗️ <b>Файл не является MP3!</b>")
                 return
 
-        status_msg = await utils.answer(message, "⏳ <b>Обработка файла...</b>")
+        status_msg = await utils.answer(message, "<emoji document_id=5303059389534466718>🦖</emoji> <b>Обработка файла...</b>")
         
         try:
             async with self._lock:
@@ -161,7 +160,6 @@ class MTagEditor(loader.Module):
                 
                 try:
                     tags = self._read_tags(temp_file)
-                    cover_info = self._get_cover_info(temp_file)
                     
                     tags_display = (
                         "🎵 <b>Теги MP3 файла:</b>\n"
@@ -189,27 +187,21 @@ class MTagEditor(loader.Module):
                         size=self._format_size(file_info['size']),
                     )
                     
-                    cover_text = "\n\n📸 <b>Обложка отсутствует</b>"
-                    if cover_info:
-                        cover_text = f"\n\n📸 <b>Обложка присутствует</b>"
-                    
                     buttons = [
                         [
                             {"text": "✏️ Редактировать теги", "callback": self._edit_tags_menu, "args": (reply.id, temp_file)},
-                            {"text": "🖼 Установить обложку", "callback": self._set_cover_start, "args": (reply.id, temp_file)},
                         ],
                         [
                             {"text": "🗑 Очистить теги", "callback": self._clear_tags, "args": (reply.id, temp_file)},
                         ]
                     ]
                     
-                    await utils.answer(status_msg, tags_display + cover_text, reply_markup=buttons)
+                    await utils.answer(status_msg, tags_display, reply_markup=buttons)
                     
                     self.current_files[reply.id] = {
                         'path': temp_file,
                         'original_message': reply,
                         'tags': tags,
-                        'cover': cover_info
                     }
                     
                 except Exception as e:
@@ -219,7 +211,7 @@ class MTagEditor(loader.Module):
                     
         except Exception as e:
             logger.error(f"Error reading tags: {e}")
-            await utils.answer(status_msg, f"❗️ <b>Ошибка чтения файла:</b>\n<code>{str(e)}</code>")
+            await utils.answer(status_msg, f"<emoji document_id=5296258510684712098>💬</emoji> <b>Ошибка чтения файла:</b>\n<code>{str(e)}</code>")
 
     async def _edit_tags_menu(self, call: InlineCall, message_id, filepath):
         if message_id not in self.current_files:
@@ -292,12 +284,12 @@ class MTagEditor(loader.Module):
                     self.current_files[message_id]['tags']['track'] = track_parts[0]
                     self.current_files[message_id]['tags']['total_tracks'] = track_parts[1]
                 else:
-                    await call.answer("❗️ <b>Неверный формат!</b>\nИспользуйте: номер/всего (например: 1/10)", show_alert=True)
+                    await call.answer("❗️ Неверный формат!\nИспользуйте: номер/всего (например: 1/10)", show_alert=True)
                     return
             elif query.isdigit():
                 self.current_files[message_id]['tags']['track'] = query
             elif query:
-                await call.answer("❗️ <b>Неверный формат!</b>\nИспользуйте: номер/всего (например: 1/10)", show_alert=True)
+                await call.answer("❗️ Неверный формат!\nИспользуйте: номер/всего (например: 1/10)", show_alert=True)
                 return
         else:
             self.current_files[message_id]['tags'][tag] = query
@@ -305,7 +297,7 @@ class MTagEditor(loader.Module):
         await self._apply_tags_to_file(message_id)
         
         await call.edit(
-            f"✅ <b>{tag} обновлен:</b> {query}",
+            f"✅ {tag} обновлен: {query}",
             reply_markup=[
                 [
                     {"text": "🔙 Назад", "callback": self._edit_tags_menu, "args": (message_id, self.current_files[message_id]['path'])}
@@ -354,7 +346,6 @@ class MTagEditor(loader.Module):
         
         file_info = self.current_files[message_id]
         tags = file_info['tags']
-        cover_info = self._get_cover_info(file_info['path'])
         
         tags_display = (
             "🎵 <b>Теги MP3 файла:</b>\n"
@@ -376,47 +367,16 @@ class MTagEditor(loader.Module):
             total_tracks=tags['total_tracks'] or '0',
         )
         
-        cover_text = "\n\n📸 <b>Обложка отсутствует</b>"
-        if cover_info:
-            cover_text = f"\n\n📸 <b>Обложка присутствует</b>"
-        
         buttons = [
             [
                 {"text": "✏️ Редактировать теги", "callback": self._edit_tags_menu, "args": (message_id, file_info['path'])},
-                {"text": "🖼 Установить обложку", "callback": self._set_cover_start, "args": (message_id, file_info['path'])},
             ],
             [
                 {"text": "🗑 Очистить теги", "callback": self._clear_tags, "args": (message_id, file_info['path'])},
             ]
         ]
         
-        await call.edit(tags_display + cover_text, reply_markup=buttons)
-
-    async def _set_cover_start(self, call: InlineCall, message_id, filepath):
-        if message_id not in self.current_files:
-            await call.answer("Файл не найден!", show_alert=True)
-            return
-        
-        file_info = self.current_files[message_id]
-        chat_id = file_info['original_message'].chat_id
-        
-        self.waiting_for_cover[call.from_user.id] = {
-            'message_id': message_id,
-            'filepath': filepath,
-            'chat_id': chat_id,
-            'user_id': call.from_user.id
-        }
-        
-        await call.edit(
-            "🖼 <b>Отправьте фото для установки обложки</b>\n"
-            f"Следующее отправленное вами фото в этот чат будет установлено как обложка.\n"
-            f"<i>Chat ID: {chat_id}</i>",
-            reply_markup=[
-                [
-                    {"text": "🔙 Назад", "callback": self._show_tags, "args": (message_id,)}
-                ]
-            ]
-        )
+        await call.edit(tags_display, reply_markup=buttons)
 
     async def _clear_tags(self, call: InlineCall, message_id, filepath):
         if message_id not in self.current_files:
@@ -428,7 +388,7 @@ class MTagEditor(loader.Module):
                 self.current_files[message_id]['tags'][key] = ''
         
         await self._apply_tags_to_file(message_id)
-        await call.answer("✅ <b>Все теги очищены!</b>", show_alert=True)
+        await call.answer("✌️ Все теги очищены!", show_alert=True)
         await self._show_tags(call, message_id)
 
     async def _save_file(self, call: InlineCall, message_id):
@@ -468,63 +428,3 @@ class MTagEditor(loader.Module):
         except Exception as e:
             logger.error(f"Error saving file: {e}")
             await call.answer("❌ Ошибка сохранения файла!", show_alert=True)
-
-    @loader.watcher(only_incoming=True)
-    async def watcher(self, message):
-        if not message.photo or message.out:
-            return
-        
-        user_id = message.sender_id
-        if not user_id or user_id not in self.waiting_for_cover:
-            return
-        
-        cover_info = self.waiting_for_cover[user_id]
-        chat_id = utils.get_chat_id(message)
-        
-        if chat_id != cover_info['chat_id']:
-            return
-        
-        message_id = cover_info['message_id']
-        
-        if message_id not in self.current_files:
-            await message.reply("❌ Файл больше не доступен")
-            if user_id in self.waiting_for_cover:
-                del self.waiting_for_cover[user_id]
-            return
-        
-        try:
-            cover_data = await message.download_media(bytes)
-            
-            audio = MP3(self.current_files[message_id]['path'], ID3=ID3)
-            
-            if not audio.tags:
-                audio.add_tags()
-            
-            audio.tags.add(
-                APIC(
-                    encoding=3,
-                    mime='image/jpeg',
-                    type=3,
-                    desc='Cover',
-                    data=cover_data
-                )
-            )
-            audio.save()
-            
-            self.current_files[message_id]['cover'] = {'data': cover_data, 'mime': 'image/jpeg'}
-            
-            await message.reply("✅ <b>Обложка установлена!</b>")
-            
-            if user_id in self.waiting_for_cover:
-                del self.waiting_for_cover[user_id]
-                
-            try:
-                await message.delete()
-            except:
-                pass
-                
-        except Exception as e:
-            logger.error(f"Error setting cover: {e}")
-            await message.reply("❌ <b>Ошибка установки обложки</b>")
-            if user_id in self.waiting_for_cover:
-                del self.waiting_for_cover[user_id] 
