@@ -1,4 +1,4 @@
-__version__ = (1, 0, 0)
+__version__ = (1, 9, 0)
 # meta developer: @mofkomodules & @Haloperidol_Pills
 # name: Foundation
 
@@ -55,6 +55,7 @@ class Foundation(loader.Module):
         self.cache_ttl = 1200
         self._spam_timestamps = defaultdict(list)
         self._spam_blocked = defaultdict(float)
+        self._spam_lock = defaultdict(asyncio.Lock)
 
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
@@ -126,30 +127,27 @@ class Foundation(loader.Module):
         key = f"{user_id}:{chat_id}"
         now = time.time()
         
-        # Очищаем старые записи (старше 15 секунд)
-        if key in self._spam_blocked and self._spam_blocked[key] < now:
-            del self._spam_blocked[key]
-        
-        # Проверяем, заблокирован ли пользователь
-        if key in self._spam_blocked:
-            return True
-        
-        # Получаем временные метки за последнюю секунду
-        timestamps = self._spam_timestamps[key]
-        one_sec_ago = now - 1.0
-        timestamps = [ts for ts in timestamps if ts > one_sec_ago]
-        
-        # Если больше 3 запросов в секунду - блокируем на 15 секунд
-        if len(timestamps) >= 3:
-            self._spam_blocked[key] = now + 15.0
-            self._spam_timestamps[key] = []
-            logger.info(f"User {user_id} blocked for 15 seconds in chat {chat_id}")
-            return True
-        
-        # Добавляем текущий запрос
-        timestamps.append(now)
-        self._spam_timestamps[key] = timestamps[-10:]
-        return False
+        async with self._spam_lock[key]:
+            if key in self._spam_blocked and now < self._spam_blocked[key]:
+                return True
+                
+            if key in self._spam_blocked and now >= self._spam_blocked[key]:
+                del self._spam_blocked[key]
+                if key in self._spam_timestamps:
+                    del self._spam_timestamps[key]
+            
+            timestamps = self._spam_timestamps[key]
+            one_sec_ago = now - 1.0
+            timestamps = [ts for ts in timestamps if ts > one_sec_ago]
+            
+            if len(timestamps) >= 3:
+                self._spam_blocked[key] = now + 15.0
+                self._spam_timestamps[key] = []
+                return True
+            
+            timestamps.append(now)
+            self._spam_timestamps[key] = timestamps[-10:]
+            return False
 
     async def _send_media(self, message: Message, media_type: str = "any", delete_command: bool = False):
         try:
