@@ -19,7 +19,6 @@ class Foundation(loader.Module):
     
     strings = {
         "name": "Foundation",
-        "sending": "<emoji document_id=6012681561286122335>🤤</emoji> Ищем...",
         "error": "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, чекай логи",
         "not_joined": "<emoji document_id=6012681561286122335>🤤</emoji> Нужно вступить в канал, внимательно читай при подаче заявки: https://t.me/+ZfmKdDrEMCA1NWEy",
         "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено медиа в канале",
@@ -135,19 +134,17 @@ class Foundation(loader.Module):
             if not await self._load_entity():
                 return await utils.answer(message, self.strings["not_joined"])
             
-            send = await utils.answer(message, self.strings["sending"])
-            
             media_list = await self._get_cached_media(media_type)
             
             if media_list is None:
-                await utils.answer(send, self.strings["not_joined"])
+                await utils.answer(message, self.strings["not_joined"])
                 return
             
             if not media_list:
                 if media_type == "any":
-                    await utils.answer(send, self.strings["no_media"])
+                    await utils.answer(message, self.strings["no_media"])
                 else:
-                    await utils.answer(send, self.strings["no_videos"])
+                    await utils.answer(message, self.strings["no_videos"])
                 return
             
             random_message = random.choice(media_list)
@@ -158,28 +155,37 @@ class Foundation(loader.Module):
                 reply_to=getattr(message, "reply_to_msg_id", None)
             )
             
-            await asyncio.sleep(0.2)
-            try:
-                await send.delete()
-            except Exception:
-                pass
-            
         except Exception:
             await utils.answer(message, self.strings["error"])
 
+    @loader.command(
+        en_doc="Send NSFW media from Foundation",
+        ru_doc="Отправить NSFW медиа с Фонда",
+    )
     async def fond(self, message: Message):
+        """Отправить NSFW медиа с Фонда"""
         if await self._check_spam(message.sender_id, utils.get_chat_id(message)):
             await utils.answer(message, self.strings["spam_protection"])
             return
         await self._send_media(message, "any")
 
+    @loader.command(
+        en_doc="Send NSFW video from Foundation",
+        ru_doc="Отправить NSFW видео с Фонда",
+    )
     async def vfond(self, message: Message):
+        """Отправить NSFW видео с Фонда"""
         if await self._check_spam(message.sender_id, utils.get_chat_id(message)):
             await utils.answer(message, self.strings["spam_protection"])
             return
         await self._send_media(message, "video")
 
+    @loader.command(
+        en_doc="Configure triggers for fond/vfond commands",
+        ru_doc="Настроить триггеры для команд fond/vfond",
+    )
     async def ftriggers(self, message: Message):
+        """Настроить триггеры для команд"""
         chat_id = utils.get_chat_id(message)
         chat = await message.get_chat()
         chat_title = getattr(chat, "title", "Private Chat")
