@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 # meta developer: @mofkomodules & @Haloperidol_Pills
 # name: Foundation
 # description: Sends NSFW media from foundation
@@ -10,6 +10,7 @@ import time
 from herokutl.types import Message
 from .. import loader, utils
 from telethon.errors import FloodWaitError
+from ..inline.types import InlineCall
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,12 @@ class Foundation(loader.Module):
         "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> No media found in channel",
         "no_messages": "<emoji document_id=6012681561286122335>🤤</emoji> No messages found in channel",
         "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> No videos found in channel",
+        "triggers_config": "⚙️ <b>Configuration of triggers for Foundation</b>\n\nChat: {} (ID: {})\n\nCurrent triggers:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
+        "select_trigger": "Select trigger to configure:",
+        "enter_trigger_word": "✍️ Enter trigger word (or 'off' to disable):",
+        "trigger_updated": "✅ Trigger updated!\n\n<code>{}</code> will now trigger <code>.{}</code> in chat {}",
+        "trigger_disabled": "✅ Trigger disabled for <code>.{}</code> in chat {}",
+        "no_triggers": "No triggers configured",
     }
 
     strings_ru = {
@@ -36,6 +43,12 @@ class Foundation(loader.Module):
         "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено медиа в канале",
         "no_messages": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено сообщений в канале",
         "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено видео в канале",
+        "triggers_config": "⚙️ <b>Настройка триггеров для Foundation</b>\n\nЧат: {} (ID: {})\n\nТекущие триггеры:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
+        "select_trigger": "Выберите триггер для настройки:",
+        "enter_trigger_word": "✍️ Введите слово-триггер (или 'off' для отключения):",
+        "trigger_updated": "✅ Триггер обновлен!\n\n<code>{}</code> теперь будет вызывать <code>.{}</code> в чате {}",
+        "trigger_disabled": "✅ Триггер отключен для <code>.{}</code> в чате {}",
+        "no_triggers": "Триггеры не настроены",
     }
 
     def __init__(self):
@@ -45,11 +58,22 @@ class Foundation(loader.Module):
         self.entity = None
         self._last_entity_check = 0
         self.entity_check_interval = 300
-        self.cache_ttl = 1200  # 20 минут вроде
-
+        self.cache_ttl = 1200
+        
+        # Конфигурация триггеров
+        self.config = loader.ModuleConfig(
+            loader.ConfigValue(
+                "triggers_enabled",
+                True,
+                "Enable trigger watcher",
+                validator=loader.validators.Boolean()
+            )
+        )
+    
     async def client_ready(self, client, db):
         self.client = client
         self._db = db
+        self.triggers = self._db.get(__name__, "triggers", {})
         await self._load_entity()
 
     async def _load_entity(self):
@@ -117,23 +141,23 @@ class Foundation(loader.Module):
         return self._media_cache.get("any") if media_type == "any" else self._video_cache.get("video")
 
     async def _send_media(self, message: Message, media_type: str = "any"):
+        """Отправляет медиа без лишних сообщений"""
         try:
             if not await self._load_entity():
                 return await utils.answer(message, self.strings["not_joined"])
             
-            send = await utils.answer(message, self.strings["sending"])
-            
+            # УБРАНО: сообщение "Ищем..." - сразу ищем медиа
             media_list = await self._get_cached_media(media_type)
             
             if media_list is None:
-                await utils.answer(send, self.strings["not_joined"])
+                await utils.answer(message, self.strings["not_joined"])
                 return
             
             if not media_list:
                 if media_type == "any":
-                    await utils.answer(send, self.strings["no_media"])
+                    await utils.answer(message, self.strings["no_media"])
                 else:
-                    await utils.answer(send, self.strings["no_videos"])
+                    await utils.answer(message, self.strings["no_videos"])
                 return
             
             random_message = random.choice(media_list)
@@ -143,12 +167,6 @@ class Foundation(loader.Module):
                 message=random_message,
                 reply_to=getattr(message, "reply_to_msg_id", None)
             )
-            
-            await asyncio.sleep(0.2)
-            try:
-                await send.delete()
-            except Exception as e:
-                logger.warning(f"Could not delete status message: {e}")
             
         except Exception as e:
             logger.error(f"Foundation error: {e}")
@@ -169,3 +187,188 @@ class Foundation(loader.Module):
     async def vfond(self, message: Message):
         """Отправить NSFW видео с Фонда"""
         await self._send_media(message, "video")
+
+    @loader.command(
+        en_doc="Configure triggers for fond/vfond commands",
+        ru_doc="Настроить триггеры для команд fond/vfond",
+    )
+    async def ftriggers(self, message: Message):
+        """Настроить триггеры для команд"""
+        chat_id = utils.get_chat_id(message)
+        chat = await message.get_chat()
+        chat_title = getattr(chat, "title", "Private Chat")
+        
+        # Получаем триггеры для этого чата
+        chat_triggers = self.triggers.get(str(chat_id), {})
+        fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
+        vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
+        
+        await self.inline.form(
+            message=message,
+            text=self.strings("triggers_config").format(
+                chat_title,
+                chat_id,
+                fond_trigger,
+                vfond_trigger
+            ),
+            reply_markup=[
+                [
+                    {
+                        "text": "⚙️ Configure fond trigger",
+                        "callback": self._configure_trigger,
+                        "args": (chat_id, "fond")
+                    }
+                ],
+                [
+                    {
+                        "text": "⚙️ Configure vfond trigger",
+                        "callback": self._configure_trigger,
+                        "args": (chat_id, "vfond")
+                    }
+                ],
+                [
+                    {
+                        "text": "❌ Close",
+                        "action": "close"
+                    }
+                ]
+            ]
+        )
+
+    async def _configure_trigger(self, call: InlineCall, chat_id: int, command: str):
+        """Настройка конкретного триггера"""
+        await call.edit(
+            self.strings("select_trigger"),
+            reply_markup=[
+                [
+                    {
+                        "text": f"✍️ Set trigger for .{command}",
+                        "input": self.strings("enter_trigger_word"),
+                        "handler": self._save_trigger,
+                        "args": (chat_id, command, call)
+                    }
+                ],
+                [
+                    {
+                        "text": "🔙 Back",
+                        "callback": self._show_main_menu,
+                        "args": (call, chat_id)
+                    }
+                ]
+            ]
+        )
+
+    async def _save_trigger(self, call: InlineCall, query: str, chat_id: int, command: str, original_call: InlineCall):
+        """Сохранение триггера"""
+        query = query.strip().lower()
+        
+        # Инициализируем структуру если её нет
+        if str(chat_id) not in self.triggers:
+            self.triggers[str(chat_id)] = {}
+        
+        if query == "off":
+            # Отключаем триггер
+            if command in self.triggers[str(chat_id)]:
+                del self.triggers[str(chat_id)][command]
+                if not self.triggers[str(chat_id)]:
+                    del self.triggers[str(chat_id)]
+        else:
+            # Устанавливаем триггер
+            self.triggers[str(chat_id)][command] = query
+        
+        # Сохраняем в БД
+        self._db.set(__name__, "triggers", self.triggers)
+        
+        # Получаем информацию о чате для сообщения
+        try:
+            chat = await self.client.get_entity(chat_id)
+            chat_title = getattr(chat, "title", "Private Chat")
+        except:
+            chat_title = f"Chat {chat_id}"
+        
+        # Отправляем сообщение об успехе
+        if query == "off":
+            await original_call.answer(
+                self.strings("trigger_disabled").format(command, chat_title),
+                show_alert=True
+            )
+        else:
+            await original_call.answer(
+                self.strings("trigger_updated").format(query, command, chat_title),
+                show_alert=True
+            )
+        
+        # Возвращаемся в главное меню
+        await self._show_main_menu(original_call, chat_id)
+
+    async def _show_main_menu(self, call: InlineCall, chat_id: int):
+        """Показывает главное меню настроек"""
+        try:
+            chat = await self.client.get_entity(chat_id)
+            chat_title = getattr(chat, "title", "Private Chat")
+        except:
+            chat_title = f"Chat {chat_id}"
+        
+        chat_triggers = self.triggers.get(str(chat_id), {})
+        fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
+        vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
+        
+        await call.edit(
+            self.strings("triggers_config").format(
+                chat_title,
+                chat_id,
+                fond_trigger,
+                vfond_trigger
+            ),
+            reply_markup=[
+                [
+                    {
+                        "text": "⚙️ Configure fond trigger",
+                        "callback": self._configure_trigger,
+                        "args": (chat_id, "fond")
+                    }
+                ],
+                [
+                    {
+                        "text": "⚙️ Configure vfond trigger",
+                        "callback": self._configure_trigger,
+                        "args": (chat_id, "vfond")
+                    }
+                ],
+                [
+                    {
+                        "text": "❌ Close",
+                        "action": "close"
+                    }
+                ]
+            ]
+        )
+
+    @loader.watcher(only_incoming=True)
+    async def trigger_watcher(self, message: Message):
+        """Watcher для триггеров"""
+        if not self.config["triggers_enabled"]:
+            return
+        
+        # Проверяем, что сообщение текстовое
+        if not message.text:
+            return
+        
+        chat_id = utils.get_chat_id(message)
+        text = message.text.strip().lower()
+        
+        # Проверяем, есть ли триггеры для этого чата
+        chat_triggers = self.triggers.get(str(chat_id), {})
+        
+        if not chat_triggers:
+            return
+        
+        # Проверяем триггеры
+        for command, trigger in chat_triggers.items():
+            if text == trigger:
+                # Имитируем команду
+                if command == "fond":
+                    await self.fond(message)
+                elif command == "vfond":
+                    await self.vfond(message)
+                break
