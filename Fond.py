@@ -1,4 +1,4 @@
-__version__ = (1, 1, 0)
+__version__ = (1, 2, 0)
 
 import random
 import logging
@@ -43,6 +43,7 @@ class Foundation(loader.Module):
         self.cache_ttl = 1200
         self._spam_timestamps = defaultdict(list)
         self._spam_lock = defaultdict(asyncio.Lock)
+        self._me = None
         
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
@@ -56,7 +57,8 @@ class Foundation(loader.Module):
     async def client_ready(self, client, db):
         self.client = client
         self._db = db
-        self.triggers = self._db.get(__name__, "triggers", {})
+        self._me = await self.client.get_me()
+        self.triggers = self._db.get(self.strings["name"], "triggers", {})
         await self._load_entity()
 
     async def _load_entity(self):
@@ -262,7 +264,7 @@ class Foundation(loader.Module):
         else:
             self.triggers[str(chat_id)][command] = query
         
-        self._db.set(__name__, "triggers", self.triggers)
+        self._db.set(self.strings["name"], "triggers", self.triggers)
         
         try:
             chat = await self.client.get_entity(chat_id)
@@ -327,7 +329,10 @@ class Foundation(loader.Module):
 
     @loader.watcher(only_incoming=True)
     async def trigger_watcher(self, message: Message):
-        if not message.text or message.out or message.sender_id == (await self.client.get_me()).id:
+        if not message.text or not message.sender_id or not self._me:
+            return
+        
+        if message.sender_id == self._me.id:
             return
         
         if not self.config["triggers_enabled"]:
