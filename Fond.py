@@ -1,9 +1,10 @@
-__version__ = (1, 3, 0)
+__version__ = (1, 0, 0)
 # meta developer: @mofkomodules & @Haloperidol_Pills
 # name: Foundation
 
 import random
 import logging
+import asyncio
 import time
 from collections import defaultdict
 from herokutl.types import Message
@@ -125,9 +126,12 @@ class Foundation(loader.Module):
         key = f"{user_id}:{chat_id}"
         now = time.time()
         
+        # Очищаем старые записи (старше 15 секунд)
+        if key in self._spam_blocked and self._spam_blocked[key] < now:
+            del self._spam_blocked[key]
+        
         # Проверяем, заблокирован ли пользователь
-        blocked_until = self._spam_blocked.get(key, 0)
-        if now < blocked_until:
+        if key in self._spam_blocked:
             return True
         
         # Получаем временные метки за последнюю секунду
@@ -139,6 +143,7 @@ class Foundation(loader.Module):
         if len(timestamps) >= 3:
             self._spam_blocked[key] = now + 15.0
             self._spam_timestamps[key] = []
+            logger.info(f"User {user_id} blocked for 15 seconds in chat {chat_id}")
             return True
         
         # Добавляем текущий запрос
@@ -342,4 +347,4 @@ class Foundation(loader.Module):
                 if await self._check_spam(message.sender_id, chat_id):
                     return
                 await self._send_media(message, "video" if command == "vfond" else "any", delete_command=True)
-                break
+                break 
