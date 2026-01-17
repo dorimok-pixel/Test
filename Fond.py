@@ -1,4 +1,4 @@
-__version__ = (1, 1, 2)
+__version__ = (1, 2, 0)
 
 import random
 import logging
@@ -58,9 +58,9 @@ class Foundation(loader.Module):
         self.client = client
         self._db = db
         self._me = await self.client.get_me()
-        # Загружаем триггеры правильно
-        self.triggers = self._db.get(__name__, "triggers", {})
-        logger.info(f"Foundation: Loaded triggers: {self.triggers}")
+        # ВАЖНО: Загружаем триггеры правильным ключом
+        self.triggers = self._db.get(self.strings["name"], "triggers", {})
+        logger.info(f"Foundation loaded triggers: {self.triggers}")
         await self._load_entity()
 
     async def _load_entity(self):
@@ -274,9 +274,9 @@ class Foundation(loader.Module):
         else:
             self.triggers[str(chat_id)][command] = query
         
-        # Сохраняем в БД правильно
-        self._db.set(__name__, "triggers", self.triggers)
-        logger.info(f"Foundation: Saved trigger for chat {chat_id}: {command} -> {query}")
+        # ВАЖНО: Сохраняем правильным ключом
+        self._db.set(self.strings["name"], "triggers", self.triggers)
+        logger.info(f"Foundation saved trigger for chat {chat_id}: {command} -> {query}")
         
         try:
             chat = await self.client.get_entity(chat_id)
@@ -339,44 +339,24 @@ class Foundation(loader.Module):
             ]
         )
 
-    @loader.watcher(only_incoming=True)
+    @loader.watcher(only_incoming=True, no_commands=True)
     async def trigger_watcher(self, message: Message):
-        # Базовые проверки
-        if not message.text:
+        # Простая и надежная проверка как в работающих модулях
+        if not hasattr(message, "text") or not message.text:
             return
         
+        # Проверяем, не наше ли это сообщение
         if message.out:
             return
         
-        if not self._me:
-            return
-        
-        # Проверка, что сообщение не от нас
-        try:
-            if message.sender_id == self._me.id:
-                return
-        except:
-            return
-        
-        # Проверка включения триггеров
         if not self.config["triggers_enabled"]:
             return
         
-        # Получаем ID чата
-        try:
-            chat_id = utils.get_chat_id(message)
-        except:
-            return
-        
-        # Получаем текст и очищаем его
+        chat_id = utils.get_chat_id(message)
         text = message.text.strip().lower()
-        
-        # Логируем для отладки
-        logger.info(f"Foundation trigger_watcher: chat_id={chat_id}, text='{text}'")
         
         # Проверяем триггеры для этого чата
         chat_triggers = self.triggers.get(str(chat_id), {})
-        logger.info(f"Foundation trigger_watcher: triggers for chat {chat_id}: {chat_triggers}")
         
         if not chat_triggers:
             return
@@ -386,12 +366,12 @@ class Foundation(loader.Module):
             await utils.answer(message, self.strings["spam_protection"])
             return
         
-        # Проверяем каждый триггер
+        # Ищем совпадение с триггером
         for command, trigger in chat_triggers.items():
             if text == trigger:
-                logger.info(f"Foundation: Trigger matched! '{text}' -> .{command}")
+                logger.info(f"Foundation trigger activated: '{text}' -> .{command}")
                 if command == "fond":
                     await self._send_media(message, "any", delete_command=False)
                 elif command == "vfond":
                     await self._send_media(message, "video", delete_command=False)
-                return  # Выходим после первого совпадения 
+                return 
