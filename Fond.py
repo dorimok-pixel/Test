@@ -1,4 +1,4 @@
-__version__ = (1, 9, 0)
+__version__ = (2, 0, 0)
 # meta developer: @mofkomodules & @Haloperidol_Pills
 # name: Foundation
 
@@ -27,8 +27,8 @@ class Foundation(loader.Module):
         "triggers_config": "⚙️ <b>Configuration of triggers for Foundation</b>\n\nChat: {} (ID: {})\n\nCurrent triggers:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
         "select_trigger": "Select trigger to configure:",
         "enter_trigger_word": "✍️ Enter trigger word (or 'off' to disable):",
-        "trigger_updated": "✅ Trigger updated!\n\n<code>{}</code> will now trigger <code>.{}</code> in chat {}",
-        "trigger_disabled": "✅ Trigger disabled for <code>.{}</code> in chat {}",
+        "trigger_updated": "✅ Trigger updated!\n\n{} will now trigger. {} in chat {}",
+        "trigger_disabled": "✅ Trigger disabled for.{} in chat {}",
         "no_triggers": "No triggers configured",
     }
 
@@ -40,8 +40,8 @@ class Foundation(loader.Module):
         "triggers_config": "⚙️ <b>Настройка триггеров для Foundation</b>\n\nЧат: {} (ID: {})\n\nТекущие триггеры:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
         "select_trigger": "Выберите триггер для настройки:",
         "enter_trigger_word": "✍️ Введите слово-триггер (или 'off' для отключения):",
-        "trigger_updated": "✅ Триггер обновлен!\n\n<code>{}</code> теперь будет вызывать <code>.{}</code> в чате {}",
-        "trigger_disabled": "✅ Триггер отключен для <code>.{}</code> в чате {}",
+        "trigger_updated": "✅ Триггер обновлен!\n\n{} теперь будет вызывать. {} в чате {}",
+        "trigger_disabled": "✅ Триггер отключен для. {} в чате {}",
         "no_triggers": "Триггеры не настроены",
     }
 
