@@ -1,4 +1,4 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 1, 1)
 
 import random
 import logging
@@ -131,7 +131,7 @@ class Foundation(loader.Module):
             self._spam_timestamps[key] = timestamps[-10:]
             return False
 
-    async def _send_media(self, message: Message, media_type: str = "any"):
+    async def _send_media(self, message: Message, media_type: str = "any", delete_command: bool = False):
         try:
             if not await self._load_entity():
                 return await utils.answer(message, self.strings["not_joined"])
@@ -157,6 +157,14 @@ class Foundation(loader.Module):
                 reply_to=getattr(message, "reply_to_msg_id", None)
             )
             
+            # Удаляем команду только если нужно
+            if delete_command:
+                await asyncio.sleep(0.1)
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+            
         except Exception:
             await utils.answer(message, self.strings["error"])
 
@@ -169,7 +177,7 @@ class Foundation(loader.Module):
         if await self._check_spam(message.sender_id, utils.get_chat_id(message)):
             await utils.answer(message, self.strings["spam_protection"])
             return
-        await self._send_media(message, "any")
+        await self._send_media(message, "any", delete_command=True)
 
     @loader.command(
         en_doc="Send NSFW video from Foundation",
@@ -180,7 +188,7 @@ class Foundation(loader.Module):
         if await self._check_spam(message.sender_id, utils.get_chat_id(message)):
             await utils.answer(message, self.strings["spam_protection"])
             return
-        await self._send_media(message, "video")
+        await self._send_media(message, "video", delete_command=True)
 
     @loader.command(
         en_doc="Configure triggers for fond/vfond commands",
@@ -341,19 +349,30 @@ class Foundation(loader.Module):
         chat_id = utils.get_chat_id(message)
         text = message.text.strip().lower()
         
-        if await self._check_spam(message.sender_id, chat_id):
-            await utils.answer(message, self.strings["spam_protection"])
-            return
-        
+        # Проверяем триггеры для этого чата
         chat_triggers = self.triggers.get(str(chat_id), {})
         
         if not chat_triggers:
             return
         
+        # Проверяем каждый триггер
+        triggered = False
         for command, trigger in chat_triggers.items():
             if text == trigger:
+                triggered = True
+                if await self._check_spam(message.sender_id, chat_id):
+                    await utils.answer(message, self.strings["spam_protection"])
+                    return
+                
                 if command == "fond":
-                    await self.fond(message)
+                    await self._send_media(message, "any", delete_command=False)
                 elif command == "vfond":
-                    await self.vfond(message)
-                break 
+                    await self._send_media(message, "video", delete_command=False)
+                break
+        
+        # Логирование для отладки
+        if triggered:
+            logger.info(f"Trigger activated in chat {chat_id}: {text} -> {command}")
+        else:
+            logger.debug(f"No trigger match in chat {chat_id} for text: {text}")
+            logger.debug(f"Available triggers for this chat: {chat_triggers}")
