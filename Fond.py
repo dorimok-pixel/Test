@@ -1,7 +1,6 @@
-__version__ = (1, 4, 0)
+__version__ = (1, 7, 0)
 # meta developer: @mofkomodules & @Haloperidol_Pills
 # name: Foundation
-# description: Sends NSFW media from foundation
 
 import random
 import logging
@@ -19,8 +18,6 @@ FOUNDATION_LINK = "https://t.me/+ZfmKdDrEMCA1NWEy"
 
 @loader.tds
 class Foundation(loader.Module):
-    """Sends NSFW media from foundation"""
-
     strings = {
         "name": "Foundation",
         "error": "<emoji document_id=6012681561286122335>🤤</emoji> Something went wrong, check logs",
@@ -37,9 +34,9 @@ class Foundation(loader.Module):
 
     strings_ru = {
         "error": "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, чекай логи",
-        "not_joined": "<emoji document_id=6012681561286122335>🤤</emoji> Нужно вступить в канал, внимательно читай при подаче заявки: https://t.me/+ZfmKdDrEMCA1NWEy",
-        "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено медиа в канале",
-        "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено видео в канале",
+        "not_joined": "<emoji document_id=6012681561286122335>🤤</emoji> Нужно вступить в канал: https://t.me/+ZfmKdDrEMCA1NWEy",
+        "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено медиа",
+        "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено видео",
         "triggers_config": "⚙️ <b>Настройка триггеров для Foundation</b>\n\nЧат: {} (ID: {})\n\nТекущие триггеры:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
         "select_trigger": "Выберите триггер для настройки:",
         "enter_trigger_word": "✍️ Введите слово-триггер (или 'off' для отключения):",
@@ -76,15 +73,12 @@ class Foundation(loader.Module):
 
     async def _load_entity(self):
         current_time = time.time()
-
         if (self.entity and 
             current_time - self._last_entity_check < self.entity_check_interval):
             return True
-
         try:
             self.entity = await self.client.get_entity(FOUNDATION_LINK)
             self._last_entity_check = current_time
-            logger.info(f"Entity loaded: {self.entity.id}")
             return True
         except Exception as e:
             logger.warning(f"Could not load foundation entity: {e}")
@@ -94,17 +88,14 @@ class Foundation(loader.Module):
     async def _get_cached_media(self, media_type="any"):
         current_time = time.time()
         cache_key = media_type
-
         if (cache_key in self._cache_time and 
             current_time - self._cache_time[cache_key] < self.cache_ttl):
             if cache_key == "any" and cache_key in self._media_cache:
                 return self._media_cache[cache_key]
             elif cache_key == "video" and cache_key in self._video_cache:
                 return self._video_cache[cache_key]
-
         if not await self._load_entity():
             return None
-
         try:
             messages = await self.client.get_messages(self.entity, limit=1500)
         except FloodWaitError as e:
@@ -115,10 +106,8 @@ class Foundation(loader.Module):
             if "Could not find the entity" in str(e):
                 return None
             raise e
-
         if not messages:
             return []
-
         if media_type == "any":
             media_messages = [msg for msg in messages if msg.media]
             self._media_cache["any"] = media_messages
@@ -130,29 +119,22 @@ class Foundation(loader.Module):
                     if 'video' in attr:
                         video_messages.append(msg)
             self._video_cache["video"] = video_messages
-
         self._cache_time[cache_key] = current_time
-        logger.info(f"Cache updated for {media_type}: {len(self._media_cache.get('any') or self._video_cache.get('video'))} items")
-
         return self._media_cache.get("any") if media_type == "any" else self._video_cache.get("video")
 
     async def _check_spam(self, user_id, chat_id):
         key = f"{user_id}:{chat_id}"
         now = time.time()
-
         block_until = self._user_blocked_until.get(key, 0)
         if now < block_until:
             return True
-
         timestamps = self._user_timestamps[key]
         one_sec_ago = now - 1.0
         timestamps = [ts for ts in timestamps if ts > one_sec_ago]
-
         if len(timestamps) >= 3:
             self._user_blocked_until[key] = now + 15.0
             self._user_timestamps[key] = []
             return True
-
         timestamps.append(now)
         self._user_timestamps[key] = timestamps[-10:]
         return False
@@ -161,35 +143,28 @@ class Foundation(loader.Module):
         try:
             if not await self._load_entity():
                 return await utils.answer(message, self.strings["not_joined"])
-
             media_list = await self._get_cached_media(media_type)
-
             if media_list is None:
                 await utils.answer(message, self.strings["not_joined"])
                 return
-
             if not media_list:
                 if media_type == "any":
                     await utils.answer(message, self.strings["no_media"])
                 else:
                     await utils.answer(message, self.strings["no_videos"])
                 return
-
             random_message = random.choice(media_list)
-
             await self.client.send_message(
                 message.peer_id,
                 message=random_message,
                 reply_to=getattr(message, "reply_to_msg_id", None)
             )
-
             if delete_command:
                 await asyncio.sleep(0.1)
                 try:
                     await message.delete()
                 except Exception:
                     pass
-
         except Exception as e:
             logger.error(f"Foundation error: {e}")
             await utils.answer(message, self.strings["error"])
@@ -220,11 +195,9 @@ class Foundation(loader.Module):
         chat_id = utils.get_chat_id(message)
         chat = await message.get_chat()
         chat_title = getattr(chat, "title", "Private Chat")
-
         chat_triggers = self.triggers.get(str(chat_id), {})
         fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
         vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
-
         await self.inline.form(
             message=message,
             text=self.strings("triggers_config").format(
@@ -281,10 +254,8 @@ class Foundation(loader.Module):
 
     async def _save_trigger(self, call: InlineCall, query: str, chat_id: int, command: str, original_call: InlineCall):
         query = query.strip().lower()
-
         if str(chat_id) not in self.triggers:
             self.triggers[str(chat_id)] = {}
-
         if query == "off":
             if command in self.triggers[str(chat_id)]:
                 del self.triggers[str(chat_id)][command]
@@ -292,15 +263,12 @@ class Foundation(loader.Module):
                     del self.triggers[str(chat_id)]
         else:
             self.triggers[str(chat_id)][command] = query
-
         self._db.set(__name__, "triggers", self.triggers)
-
         try:
             chat = await self.client.get_entity(chat_id)
             chat_title = getattr(chat, "title", "Private Chat")
         except:
             chat_title = f"Chat {chat_id}"
-
         if query == "off":
             await original_call.answer(
                 self.strings("trigger_disabled").format(command, chat_title),
@@ -311,7 +279,6 @@ class Foundation(loader.Module):
                 self.strings("trigger_updated").format(query, command, chat_title),
                 show_alert=True
             )
-
         await self._show_main_menu(original_call, chat_id)
 
     async def _show_main_menu(self, call: InlineCall, chat_id: int):
@@ -320,11 +287,9 @@ class Foundation(loader.Module):
             chat_title = getattr(chat, "title", "Private Chat")
         except:
             chat_title = f"Chat {chat_id}"
-
         chat_triggers = self.triggers.get(str(chat_id), {})
         fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
         vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
-
         await call.edit(
             self.strings("triggers_config").format(
                 chat_title,
@@ -360,17 +325,14 @@ class Foundation(loader.Module):
     async def watcher(self, message: Message):
         if not self.config["triggers_enabled"]:
             return
-
         if not message.text or message.out:
             return
-
         chat_id = utils.get_chat_id(message)
         text = message.text.lower().strip()
         chat_triggers = self.triggers.get(str(chat_id), {})
-
         for command, trigger in chat_triggers.items():
             if text == trigger:
                 if await self._check_spam(message.sender_id, chat_id):
                     return
-                await self._send_media(message, "video" if command == "vfond" else "any", delete_command=True)
-                break 
+                await self._send_media(message, "video" if command == "vfond" else "any", delete_command=False)
+                break
