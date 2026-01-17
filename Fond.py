@@ -1,4 +1,7 @@
-__version__ = (1, 2, 0)
+__version__ = (1, 3, 0)
+# meta developer: @mofkomodules & @Haloperidol_Pills
+# name: Foundation
+# description: Sends NSFW media from foundation
 
 import random
 import logging
@@ -16,13 +19,27 @@ FOUNDATION_LINK = "https://t.me/+ZfmKdDrEMCA1NWEy"
 
 @loader.tds
 class Foundation(loader.Module):
+    """Sends NSFW media from foundation"""
     
     strings = {
         "name": "Foundation",
+        "error": "<emoji document_id=6012681561286122335>🤤</emoji> Something went wrong, check logs",
+        "not_joined": "<emoji document_id=6012681561286122335>🤤</emoji> You need to join the channel first: https://t.me/+ZfmKdDrEMCA1NWEy",
+        "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> No media found in channel",
+        "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> No videos found in channel",
+        "triggers_config": "⚙️ <b>Configuration of triggers for Foundation</b>\n\nChat: {} (ID: {})\n\nCurrent triggers:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
+        "select_trigger": "Select trigger to configure:",
+        "enter_trigger_word": "✍️ Enter trigger word (or 'off' to disable):",
+        "trigger_updated": "✅ Trigger updated!\n\n<code>{}</code> will now trigger <code>.{}</code> in chat {}",
+        "trigger_disabled": "✅ Trigger disabled for <code>.{}</code> in chat {}",
+        "no_triggers": "No triggers configured",
+        "spam_protection": "<emoji document_id=6012681561286122335>🤤</emoji> Too many requests, please wait",
+    }
+
+    strings_ru = {
         "error": "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, чекай логи",
         "not_joined": "<emoji document_id=6012681561286122335>🤤</emoji> Нужно вступить в канал, внимательно читай при подаче заявки: https://t.me/+ZfmKdDrEMCA1NWEy",
         "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено медиа в канале",
-        "no_messages": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено сообщений в канале",
         "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено видео в канале",
         "triggers_config": "⚙️ <b>Настройка триггеров для Foundation</b>\n\nЧат: {} (ID: {})\n\nТекущие триггеры:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
         "select_trigger": "Выберите триггер для настройки:",
@@ -43,7 +60,6 @@ class Foundation(loader.Module):
         self.cache_ttl = 1200
         self._spam_timestamps = defaultdict(list)
         self._spam_lock = defaultdict(asyncio.Lock)
-        self._me = None
         
         self.config = loader.ModuleConfig(
             loader.ConfigValue(
@@ -57,31 +73,34 @@ class Foundation(loader.Module):
     async def client_ready(self, client, db):
         self.client = client
         self._db = db
-        self._me = await self.client.get_me()
-        # ВАЖНО: Загружаем триггеры правильным ключом
-        self.triggers = self._db.get(self.strings["name"], "triggers", {})
-        logger.info(f"Foundation loaded triggers: {self.triggers}")
+        self.triggers = self._db.get(__name__, "triggers", {})
         await self._load_entity()
 
     async def _load_entity(self):
+        """Загружает entity канала с кешированием"""
         current_time = time.time()
         
-        if self.entity and current_time - self._last_entity_check < self.entity_check_interval:
+        if (self.entity and 
+            current_time - self._last_entity_check < self.entity_check_interval):
             return True
         
         try:
             self.entity = await self.client.get_entity(FOUNDATION_LINK)
             self._last_entity_check = current_time
+            logger.info(f"Entity loaded: {self.entity.id}")
             return True
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Could not load foundation entity: {e}")
             self.entity = None
             return False
 
     async def _get_cached_media(self, media_type="any"):
+        """Получает медиа из кеша с обработкой FloodWait"""
         current_time = time.time()
         cache_key = media_type
         
-        if cache_key in self._cache_time and current_time - self._cache_time[cache_key] < self.cache_ttl:
+        if (cache_key in self._cache_time and 
+            current_time - self._cache_time[cache_key] < self.cache_ttl):
             if cache_key == "any" and cache_key in self._media_cache:
                 return self._media_cache[cache_key]
             elif cache_key == "video" and cache_key in self._video_cache:
@@ -93,6 +112,7 @@ class Foundation(loader.Module):
         try:
             messages = await self.client.get_messages(self.entity, limit=1500)
         except FloodWaitError as e:
+            logger.warning(f"FloodWait for {e.seconds} seconds")
             await asyncio.sleep(e.seconds)
             return await self._get_cached_media(media_type)
         except ValueError as e:
@@ -116,9 +136,12 @@ class Foundation(loader.Module):
             self._video_cache["video"] = video_messages
         
         self._cache_time[cache_key] = current_time
+        logger.info(f"Cache updated for {media_type}: {len(self._media_cache.get('any') or self._video_cache.get('video'))} items")
+        
         return self._media_cache.get("any") if media_type == "any" else self._video_cache.get("video")
 
     async def _check_spam(self, user_id, chat_id):
+        """Проверяет, не превышен ли лимит запросов"""
         key = f"{user_id}:{chat_id}"
         now = time.time()
         
@@ -134,6 +157,7 @@ class Foundation(loader.Module):
             return False
 
     async def _send_media(self, message: Message, media_type: str = "any", delete_command: bool = False):
+        """Отправляет медиа без лишних сообщений"""
         try:
             if not await self._load_entity():
                 return await utils.answer(message, self.strings["not_joined"])
@@ -167,7 +191,8 @@ class Foundation(loader.Module):
                 except Exception:
                     pass
             
-        except Exception:
+        except Exception as e:
+            logger.error(f"Foundation error: {e}")
             await utils.answer(message, self.strings["error"])
 
     @loader.command(
@@ -202,13 +227,14 @@ class Foundation(loader.Module):
         chat = await message.get_chat()
         chat_title = getattr(chat, "title", "Private Chat")
         
+        # Получаем триггеры для этого чата
         chat_triggers = self.triggers.get(str(chat_id), {})
-        fond_trigger = chat_triggers.get("fond", self.strings["no_triggers"])
-        vfond_trigger = chat_triggers.get("vfond", self.strings["no_triggers"])
+        fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
+        vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
         
         await self.inline.form(
             message=message,
-            text=self.strings["triggers_config"].format(
+            text=self.strings("triggers_config").format(
                 chat_title,
                 chat_id,
                 fond_trigger,
@@ -239,13 +265,14 @@ class Foundation(loader.Module):
         )
 
     async def _configure_trigger(self, call: InlineCall, chat_id: int, command: str):
+        """Настройка конкретного триггера"""
         await call.edit(
-            self.strings["select_trigger"],
+            self.strings("select_trigger"),
             reply_markup=[
                 [
                     {
                         "text": f"✍️ Set trigger for .{command}",
-                        "input": self.strings["enter_trigger_word"],
+                        "input": self.strings("enter_trigger_word"),
                         "handler": self._save_trigger,
                         "args": (chat_id, command, call)
                     }
@@ -261,43 +288,50 @@ class Foundation(loader.Module):
         )
 
     async def _save_trigger(self, call: InlineCall, query: str, chat_id: int, command: str, original_call: InlineCall):
+        """Сохранение триггера"""
         query = query.strip().lower()
         
+        # Инициализируем структуру если её нет
         if str(chat_id) not in self.triggers:
             self.triggers[str(chat_id)] = {}
         
         if query == "off":
+            # Отключаем триггер
             if command in self.triggers[str(chat_id)]:
                 del self.triggers[str(chat_id)][command]
                 if not self.triggers[str(chat_id)]:
                     del self.triggers[str(chat_id)]
         else:
+            # Устанавливаем триггер
             self.triggers[str(chat_id)][command] = query
         
-        # ВАЖНО: Сохраняем правильным ключом
-        self._db.set(self.strings["name"], "triggers", self.triggers)
-        logger.info(f"Foundation saved trigger for chat {chat_id}: {command} -> {query}")
+        # Сохраняем в БД
+        self._db.set(__name__, "triggers", self.triggers)
         
+        # Получаем информацию о чате для сообщения
         try:
             chat = await self.client.get_entity(chat_id)
             chat_title = getattr(chat, "title", "Private Chat")
         except:
             chat_title = f"Chat {chat_id}"
         
+        # Отправляем сообщение об успехе
         if query == "off":
             await original_call.answer(
-                self.strings["trigger_disabled"].format(command, chat_title),
+                self.strings("trigger_disabled").format(command, chat_title),
                 show_alert=True
             )
         else:
             await original_call.answer(
-                self.strings["trigger_updated"].format(query, command, chat_title),
+                self.strings("trigger_updated").format(query, command, chat_title),
                 show_alert=True
             )
         
+        # Возвращаемся в главное меню
         await self._show_main_menu(original_call, chat_id)
 
     async def _show_main_menu(self, call: InlineCall, chat_id: int):
+        """Показывает главное меню настроек"""
         try:
             chat = await self.client.get_entity(chat_id)
             chat_title = getattr(chat, "title", "Private Chat")
@@ -305,11 +339,11 @@ class Foundation(loader.Module):
             chat_title = f"Chat {chat_id}"
         
         chat_triggers = self.triggers.get(str(chat_id), {})
-        fond_trigger = chat_triggers.get("fond", self.strings["no_triggers"])
-        vfond_trigger = chat_triggers.get("vfond", self.strings["no_triggers"])
+        fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
+        vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
         
         await call.edit(
-            self.strings["triggers_config"].format(
+            self.strings("triggers_config").format(
                 chat_title,
                 chat_id,
                 fond_trigger,
@@ -339,39 +373,36 @@ class Foundation(loader.Module):
             ]
         )
 
-    @loader.watcher(only_incoming=True, no_commands=True)
+    @loader.watcher(only_incoming=True)
     async def trigger_watcher(self, message: Message):
-        # Простая и надежная проверка как в работающих модулях
-        if not hasattr(message, "text") or not message.text:
-            return
-        
-        # Проверяем, не наше ли это сообщение
-        if message.out:
-            return
-        
+        """Watcher для триггеров"""
         if not self.config["triggers_enabled"]:
+            return
+        
+        # Проверяем, что сообщение текстовое
+        if not message.text:
             return
         
         chat_id = utils.get_chat_id(message)
         text = message.text.strip().lower()
         
-        # Проверяем триггеры для этого чата
+        # Проверяем, есть ли триггеры для этого чата
         chat_triggers = self.triggers.get(str(chat_id), {})
         
         if not chat_triggers:
             return
         
-        # Проверяем спам
-        if await self._check_spam(message.sender_id, chat_id):
-            await utils.answer(message, self.strings["spam_protection"])
-            return
-        
-        # Ищем совпадение с триггером
+        # Проверяем триггеры
         for command, trigger in chat_triggers.items():
             if text == trigger:
-                logger.info(f"Foundation trigger activated: '{text}' -> .{command}")
+                # Проверяем спам для триггеров
+                if await self._check_spam(message.sender_id, chat_id):
+                    await utils.answer(message, self.strings["spam_protection"])
+                    return
+                
+                # Имитируем команду (без удаления сообщения)
                 if command == "fond":
                     await self._send_media(message, "any", delete_command=False)
                 elif command == "vfond":
                     await self._send_media(message, "video", delete_command=False)
-                return 
+                break 
