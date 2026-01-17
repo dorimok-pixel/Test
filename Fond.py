@@ -1,4 +1,4 @@
-__version__ = (1, 2, 1)
+__version__ = (1, 1, 0)
 
 import random
 import logging
@@ -19,23 +19,11 @@ class Foundation(loader.Module):
     
     strings = {
         "name": "Foundation",
-        "error": "<emoji document_id=6012681561286122335>🤤</emoji> Something went wrong, check logs",
-        "not_joined": "<emoji document_id=6012681561286122335>🤤</emoji> You need to join the channel first: https://t.me/+ZfmKdDrEMCA1NWEy",
-        "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> No media found in channel",
-        "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> No videos found in channel",
-        "triggers_config": "⚙️ <b>Configuration of triggers for Foundation</b>\n\nChat: {} (ID: {})\n\nCurrent triggers:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
-        "select_trigger": "Select trigger to configure:",
-        "enter_trigger_word": "✍️ Enter trigger word (or 'off' to disable):",
-        "trigger_updated": "✅ Trigger updated!\n\n<code>{}</code> will now trigger <code>.{}</code> in chat {}",
-        "trigger_disabled": "✅ Trigger disabled for <code>.{}</code> in chat {}",
-        "no_triggers": "No triggers configured",
-        "spam_protection": "<emoji document_id=6012681561286122335>🤤</emoji> Too many requests, please wait",
-    }
-
-    strings_ru = {
+        "sending": "<emoji document_id=6012681561286122335>🤤</emoji> Ищем...",
         "error": "<emoji document_id=6012681561286122335>🤤</emoji> Чот не то, чекай логи",
         "not_joined": "<emoji document_id=6012681561286122335>🤤</emoji> Нужно вступить в канал, внимательно читай при подаче заявки: https://t.me/+ZfmKdDrEMCA1NWEy",
         "no_media": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено медиа в канале",
+        "no_messages": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено сообщений в канале",
         "no_videos": "<emoji document_id=6012681561286122335>🤤</emoji> Не найдено видео в канале",
         "triggers_config": "⚙️ <b>Настройка триггеров для Foundation</b>\n\nЧат: {} (ID: {})\n\nТекущие триггеры:\n• <code>fond</code>: {}\n• <code>vfond</code>: {}",
         "select_trigger": "Выберите триггер для настройки:",
@@ -147,17 +135,19 @@ class Foundation(loader.Module):
             if not await self._load_entity():
                 return await utils.answer(message, self.strings["not_joined"])
             
+            send = await utils.answer(message, self.strings["sending"])
+            
             media_list = await self._get_cached_media(media_type)
             
             if media_list is None:
-                await utils.answer(message, self.strings["not_joined"])
+                await utils.answer(send, self.strings["not_joined"])
                 return
             
             if not media_list:
                 if media_type == "any":
-                    await utils.answer(message, self.strings["no_media"])
+                    await utils.answer(send, self.strings["no_media"])
                 else:
-                    await utils.answer(message, self.strings["no_videos"])
+                    await utils.answer(send, self.strings["no_videos"])
                 return
             
             random_message = random.choice(media_list)
@@ -168,13 +158,25 @@ class Foundation(loader.Module):
                 reply_to=getattr(message, "reply_to_msg_id", None)
             )
             
+            await asyncio.sleep(0.2)
+            try:
+                await send.delete()
+            except Exception:
+                pass
+            
         except Exception:
             await utils.answer(message, self.strings["error"])
 
     async def fond(self, message: Message):
+        if await self._check_spam(message.sender_id, utils.get_chat_id(message)):
+            await utils.answer(message, self.strings["spam_protection"])
+            return
         await self._send_media(message, "any")
 
     async def vfond(self, message: Message):
+        if await self._check_spam(message.sender_id, utils.get_chat_id(message)):
+            await utils.answer(message, self.strings["spam_protection"])
+            return
         await self._send_media(message, "video")
 
     async def ftriggers(self, message: Message):
@@ -183,12 +185,12 @@ class Foundation(loader.Module):
         chat_title = getattr(chat, "title", "Private Chat")
         
         chat_triggers = self.triggers.get(str(chat_id), {})
-        fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
-        vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
+        fond_trigger = chat_triggers.get("fond", self.strings["no_triggers"])
+        vfond_trigger = chat_triggers.get("vfond", self.strings["no_triggers"])
         
         await self.inline.form(
             message=message,
-            text=self.strings("triggers_config").format(
+            text=self.strings["triggers_config"].format(
                 chat_title,
                 chat_id,
                 fond_trigger,
@@ -220,12 +222,12 @@ class Foundation(loader.Module):
 
     async def _configure_trigger(self, call: InlineCall, chat_id: int, command: str):
         await call.edit(
-            self.strings("select_trigger"),
+            self.strings["select_trigger"],
             reply_markup=[
                 [
                     {
                         "text": f"✍️ Set trigger for .{command}",
-                        "input": self.strings("enter_trigger_word"),
+                        "input": self.strings["enter_trigger_word"],
                         "handler": self._save_trigger,
                         "args": (chat_id, command, call)
                     }
@@ -264,12 +266,12 @@ class Foundation(loader.Module):
         
         if query == "off":
             await original_call.answer(
-                self.strings("trigger_disabled").format(command, chat_title),
+                self.strings["trigger_disabled"].format(command, chat_title),
                 show_alert=True
             )
         else:
             await original_call.answer(
-                self.strings("trigger_updated").format(query, command, chat_title),
+                self.strings["trigger_updated"].format(query, command, chat_title),
                 show_alert=True
             )
         
@@ -283,11 +285,11 @@ class Foundation(loader.Module):
             chat_title = f"Chat {chat_id}"
         
         chat_triggers = self.triggers.get(str(chat_id), {})
-        fond_trigger = chat_triggers.get("fond", self.strings("no_triggers"))
-        vfond_trigger = chat_triggers.get("vfond", self.strings("no_triggers"))
+        fond_trigger = chat_triggers.get("fond", self.strings["no_triggers"])
+        vfond_trigger = chat_triggers.get("vfond", self.strings["no_triggers"])
         
         await call.edit(
-            self.strings("triggers_config").format(
+            self.strings["triggers_config"].format(
                 chat_title,
                 chat_id,
                 fond_trigger,
